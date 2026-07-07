@@ -543,7 +543,7 @@ function fillText(){
 fillText();
 
 /* carousel */
-let ci=0;
+let ci=0, firstPaint=true;
 const stageImg=$('#stageImg'), thumbsEl=$('#thumbs'), aboutImg=$('#aboutImg');
 aboutImg.src=GALLERY[ABOUT_INDEX].src;
 GALLERY.forEach((g,i)=>{ const t=document.createElement('img'); t.src=g.src; t.loading='lazy'; t.alt=g.label; t.onclick=()=>setSlide(i); thumbsEl.appendChild(t); });
@@ -552,7 +552,11 @@ function setSlide(i){ ci=(i+GALLERY.length)%GALLERY.length; const g=GALLERY[ci];
   stageImg.src=g.src; $('#cCount').textContent=(ci+1)+' / '+GALLERY.length;
   $('#cCap').textContent=g.label; $('#cSub').textContent=g.sub||'';
   [...thumbsEl.children].forEach((t,k)=>t.classList.toggle('active',k===ci));
-  const a=thumbsEl.children[ci]; if(a) a.scrollIntoView({block:'nearest',inline:'center',behavior:'smooth'});
+  const a=thumbsEl.children[ci];
+  if(a && !firstPaint){ // scroll the thumbnail strip horizontally only — never move the page
+    const target=thumbsEl.scrollLeft + a.getBoundingClientRect().left - thumbsEl.getBoundingClientRect().left - (thumbsEl.clientWidth - a.clientWidth)/2;
+    thumbsEl.scrollTo({left:Math.max(0,target),behavior:'smooth'});
+  }
   if($('#lightbox').classList.contains('open')){ $('#lbImg').src=g.src; $('#lbCount').textContent=lbLabel(g); } }
 $('#cPrev').onclick=()=>setSlide(ci-1);
 $('#cNext').onclick=()=>setSlide(ci+1);
@@ -563,7 +567,7 @@ $('#lbNext').onclick=()=>setSlide(ci+1);
 $('#lightbox').onclick=e=>{ if(e.target.id==='lightbox') $('#lightbox').classList.remove('open'); };
 document.addEventListener('keydown',e=>{ if(!$('#lightbox').classList.contains('open'))return;
   if(e.key==='Escape')$('#lightbox').classList.remove('open'); if(e.key==='ArrowLeft')setSlide(ci-1); if(e.key==='ArrowRight')setSlide(ci+1); });
-setSlide(0);
+setSlide(0); firstPaint=false;
 
 /* nav */
 const nav=$('#nav'); const onScroll=()=>nav.classList.toggle('solid',window.scrollY>60); onScroll(); window.addEventListener('scroll',onScroll,{passive:true});
