@@ -1,0 +1,12 @@
+{
+  "name": "villa-siesta",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Villa Siesta direct-booking site (static front-end + tiny server for Node hosts like Railway).",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "engines": {
+    "node": ">=18"
+  }
+}
