@@ -180,14 +180,19 @@ const CONFIG = {
   .dow{display:grid;grid-template-columns:repeat(7,1fr);gap:4px;margin-bottom:6px}
   .dow span{text-align:center;font-size:.66rem;font-weight:600;letter-spacing:.1em;color:var(--muted);text-transform:uppercase}
   .grid7{display:grid;grid-template-columns:repeat(7,1fr);gap:4px}
-  .day{aspect-ratio:1;display:flex;align-items:center;justify-content:center;border-radius:var(--r);font-size:.9rem;font-weight:500;cursor:pointer;border:1px solid transparent;transition:background .12s,color .12s}
+  .day{aspect-ratio:1;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:1px;border-radius:var(--r);font-size:.9rem;font-weight:500;cursor:pointer;border:1px solid transparent;transition:background .12s,color .12s;line-height:1.02}
+  .day .dnum{font-weight:500}
+  .day .drate{font-size:.56rem;font-weight:600;color:var(--muted);letter-spacing:.01em}
   .day.empty{cursor:default}
   .day.avail:hover{background:var(--gray)}
   .day.blocked{color:#c3c8d4;text-decoration:line-through;cursor:not-allowed}
   .day.past{color:#d6dae2;cursor:not-allowed}
   .day.sel{background:var(--navy);color:#fff}
+  .day.sel .drate{color:rgba(255,255,255,.82)}
   .day.range{background:#dce2f2;color:var(--navy)}
+  .day.range .drate{color:var(--navy)}
   .day.sel.end{background:var(--navy-deep);color:#fff}
+  @media(max-width:560px){ .day{font-size:.8rem} .day .drate{font-size:.48rem} }
   .legend{display:flex;gap:16px;flex-wrap:wrap;margin-top:16px;font-size:.76rem;color:var(--muted)}
   .legend i{display:inline-block;width:12px;height:12px;border-radius:3px;margin-right:6px;vertical-align:-1px}
   .minnote{margin-top:12px;font-size:.78rem;color:var(--muted)}
@@ -592,10 +597,12 @@ function render(){
   for(let i=0;i<first;i++){ const e=document.createElement('div'); e.className='day empty'; days.appendChild(e); }
   for(let d=1;d<=n;d++){
     const date=new Date(y,m,d), key=fmt(date);
-    const el=document.createElement('div'); el.textContent=d; el.className='day';
+    const el=document.createElement('div'); el.className='day';
+    el.innerHTML='<span class="dnum">'+d+'</span>';
     if(date<today) el.classList.add('past');
     else if(blocked.has(key)) el.classList.add('blocked');
     else{ el.classList.add('avail');
+      el.innerHTML+='<span class="drate">'+money(rateFor(date))+'</span>';
       if(checkIn && key===fmt(checkIn)) el.classList.add('sel');
       if(checkOut && key===fmt(checkOut)) el.classList.add('sel','end');
       if(checkIn && checkOut && date>checkIn && date<checkOut) el.classList.add('range');
