@@ -22,7 +22,10 @@
   let _seq = 0;
 
   function endpoint() {
-    const fromConfig = (window.CONFIG && window.CONFIG.webAppUrl) || "";
+    // CONFIG is declared with `const` in index.html, so it lives in the shared
+    // global lexical scope — NOT on `window`. Read it directly (typeof guards
+    // against it being absent). `window.CONFIG` would be undefined here.
+    var fromConfig = (typeof CONFIG !== 'undefined' && CONFIG && CONFIG.webAppUrl) || "";
     return (WEBAPP_URL || fromConfig || "").trim();
   }
 

@@ -210,6 +210,13 @@ const CONFIG = {
   .petline input{width:16px;height:16px;accent-color:var(--navy);flex:none}
   .petline em{color:var(--muted);font-style:normal}
   form.req .btn-navy{width:100%;justify-content:center;margin-top:6px}
+  .confirm{text-align:center;padding:18px 4px 8px;animation:cfade .4s ease}
+  @keyframes cfade{from{opacity:0;transform:translateY(6px)}to{opacity:1;transform:none}}
+  .confirm-check{width:66px;height:66px;border-radius:50%;background:var(--navy);color:#fff;font-size:2rem;display:flex;align-items:center;justify-content:center;margin:0 auto 20px}
+  .confirm h3{font-size:2rem;margin-bottom:12px}
+  .confirm-lead{font-size:1.02rem;color:var(--ink);margin-bottom:16px}
+  .confirm .note{color:var(--muted);font-size:.92rem;margin-bottom:12px;line-height:1.6}
+  .confirm .note b{color:var(--ink);font-weight:600}
 
   .pay{background:var(--white)}
   .pay .grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:1px;margin-top:40px;background:var(--line);border:1px solid var(--line)}
@@ -650,7 +657,19 @@ render(); quote();
 const guestsEl=document.querySelector('[name=guests]'); if(guestsEl) guestsEl.addEventListener('input',quote);
 if($('#f-pet')) $('#f-pet').addEventListener('change',quote);
 
-const success=(name)=>`<h3>Request sent ✔</h3><p class="note">Thanks ${name||'there'}! The owner will reply soon with your total and payment details.</p>`;
+const niceDate=s=>{ try{ return parse(s).toLocaleDateString('en-US',{month:'short',day:'numeric',year:'numeric'}); }catch(_){ return s; } };
+function showConfirmation(form,d){
+  const range=(d.checkin&&d.checkout)?' for <b>'+niceDate(d.checkin)+' &rarr; '+niceDate(d.checkout)+'</b>':'';
+  form.innerHTML=
+    '<div class="confirm">'+
+      '<div class="confirm-check">&#10003;</div>'+
+      '<h3>Request submitted</h3>'+
+      '<p class="confirm-lead">Thank you, '+(d.first||'there')+' &mdash; your booking request'+range+' has been received.</p>'+
+      '<p class="note">The owner will respond within <b>24&ndash;48 hours</b> with payment instructions if your reservation can be approved. <b>Nothing has been charged yet.</b></p>'+
+      '<p class="note">Questions in the meantime? Call '+CONFIG.ownerPhone+' or email '+CONFIG.ownerEmail+'.</p>'+
+    '</div>';
+  try{ document.getElementById('book').scrollIntoView({behavior:'smooth',block:'start'}); }catch(_){}
+}
 
 $('#reqform').addEventListener('submit', async e=>{
   e.preventDefault();
@@ -661,10 +680,10 @@ $('#reqform').addEventListener('submit', async e=>{
     // Preferred path: live Apps Script backend (logs to the Sheet + emails everyone).
     if(window.VillaSiestaAPI && VillaSiestaAPI.endpoint()){
       await VillaSiestaAPI.submitBooking(data);
-      form.innerHTML=success(data.first);
+      showConfirmation(form,data);
     } else if(CONFIG.formEndpoint){
       const r=await fetch(CONFIG.formEndpoint,{method:'POST',headers:{'Accept':'application/json'},body:new FormData(form)});
-      if(!r.ok) throw new Error(); form.innerHTML=success(data.first);
+      if(!r.ok) throw new Error(); showConfirmation(form,data);
     } else {
       const body=`Booking request for ${CONFIG.propertyName}%0D%0A%0D%0AName: ${data.first} ${data.last}%0D%0AEmail: ${data.email}%0D%0APhone: ${data.phone}%0D%0AGuests: ${data.guests}%0D%0APet: ${data.pet?'Yes':'No'}%0D%0ADates: ${data.checkin} to ${data.checkout}%0D%0AQuote: ${data.quote}%0D%0A%0D%0A${data.message||''}`;
       window.location.href=`mailto:${CONFIG.ownerEmail}?subject=Booking request — ${CONFIG.propertyName}&body=${body}`;
