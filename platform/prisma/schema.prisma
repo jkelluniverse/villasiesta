@@ -1,0 +1,217 @@
+// Villa Siesta — Postgres schema (Prisma)
+// Run: npx prisma migrate dev --name init   (then `prisma migrate deploy` on Railway)
+// DATABASE_URL is provided automatically by the Railway Postgres plugin.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ---------- Auth (owner + dad) ----------
+enum Role {
+  OWNER   // full control
+  VIEWER  // read-only (e.g. dad)
+}
+
+model User {
+  id           String   @id @default(cuid())
+  email        String   @unique
+  name         String?
+  passwordHash String?  // if using credentials; omit for magic-link
+  role         Role     @default(OWNER)
+  createdAt    DateTime @default(now())
+}
+
+// ---------- Property (multi-property ready; Villa Siesta is the first) ----------
+model Property {
+  id             String   @id @default(cuid())
+  slug           String   @unique          // "villa-siesta"
+  name           String
+  location       String
+  bedrooms       Int
+  bathrooms      Float
+  sleeps         Int
+  description    String
+  minNights      Int      @default(7)
+  maxNights      Int      @default(20)
+  checkinTime    String   @default("4:00 PM")
+  checkoutTime   String   @default("10:00 AM")
+  cancellation   String   @default("Flexible")
+  bookingMode    String   @default("request") // request | instant
+  airbnbIcalUrl  String?
+  currency       String   @default("$")
+  createdAt      DateTime @default(now())
+
+  photos       Photo[]
+  pricingRules PricingRule[]
+  fees         Fee[]
+  bookings     Booking[]
+  blocks       CalendarBlock[]
+}
+
+model Photo {
+  id         String  @id @default(cuid())
+  propertyId String
+  url        String
+  label      String  // "Living room", "Full bathroom 1", "Pool"...
+  sublabel   String? // "King bed"
+  sortOrder  Int     @default(0)
+  property   Property @relation(fields: [propertyId], references: [id], onDelete: Cascade)
+}
+
+// ---------- Pricing: seasonal defaults + owner overrides + blackouts ----------
+enum PricingType {
+  SEASONAL   // month-based default rate
+  CUSTOM     // date-range price override
+  BLACKOUT   // date-range unavailable (owner)
+  MIN_NIGHTS // date-range minimum-stay override
+}
+
+model PricingRule {
+  id         String      @id @default(cuid())
+  propertyId String
+  type       PricingType
+  month      Int?        // 1-12 for SEASONAL
+  startDate  DateTime?   // for CUSTOM / BLACKOUT / MIN_NIGHTS
+  endDate    DateTime?   // checkout-exclusive
+  value      Int?        // nightly rate, or min-nights
+  note       String?
+  property   Property    @relation(fields: [propertyId], references: [id], onDelete: Cascade)
+
+  @@index([propertyId, type])
+}
+
+enum FeeType {
+  CLEANING
+  PET
+  EXTRA_GUEST
+  TAX_PERCENT
+  CARD_FEE_PERCENT
+}
+
+model Fee {
+  id         String  @id @default(cuid())
+  propertyId String
+  type       FeeType
+  amount     Float   // flat dollars, or percent for TAX/CARD
+  threshold  Int?    // e.g. extra guest after N
+  property   Property @relation(fields: [propertyId], references: [id], onDelete: Cascade)
+}
+
+// ---------- Guests / clients (save all client data) ----------
+model Client {
+  id        String    @id @default(cuid())
+  firstName String
+  lastName  String
+  email     String
+  phone     String?
+  address   String?
+  notes     String?
+  createdAt DateTime  @default(now())
+
+  bookings  Booking[]
+  comms     CommsLog[]
+
+  @@unique([email])
+}
+
+// ---------- Bookings (the state machine: requested -> approved -> paid) ----------
+enum BookingStatus {
+  REQUESTED
+  APPROVED
+  PAID
+  CANCELLED
+  EXPIRED
+}
+
+enum PaymentMethod {
+  ACH
+  CARD
+  ZELLE
+  CASHAPP
+  VENMO
+  CHIME
+}
+
+model Booking {
+  id             String         @id @default(cuid())
+  propertyId     String
+  clientId       String
+  checkIn        DateTime       @db.Date
+  checkOut       DateTime       @db.Date   // checkout-exclusive
+  nights         Int
+  guests         Int
+  subtotal       Float          // sum of per-night rates
+  cleaningFee    Float          @default(0)
+  petFee         Float          @default(0)
+  taxAmount      Float          @default(0)
+  cardFee        Float          @default(0)
+  total          Float
+  status         BookingStatus  @default(REQUESTED)
+  paymentMethod  PaymentMethod?
+  stripeSession  String?
+  holdExpiresAt  DateTime?      // for approved-awaiting-payment holds
+  message        String?
+  createdAt      DateTime       @default(now())
+  updatedAt      DateTime       @updatedAt
+
+  property Property @relation(fields: [propertyId], references: [id])
+  client   Client   @relation(fields: [clientId], references: [id])
+  block    CalendarBlock?
+
+  @@index([propertyId, status])
+  @@index([checkIn, checkOut])
+}
+
+// ---------- Calendar blocks (owner blocks, Airbnb-synced, and booking holds) ----------
+enum BlockSource {
+  OWNER
+  AIRBNB
+  BOOKING
+}
+
+model CalendarBlock {
+  id         String      @id @default(cuid())
+  propertyId String
+  startDate  DateTime    @db.Date
+  endDate    DateTime    @db.Date  // checkout-exclusive
+  source     BlockSource
+  summary    String?
+  bookingId  String?     @unique
+  createdAt  DateTime    @default(now())
+
+  property Property @relation(fields: [propertyId], references: [id], onDelete: Cascade)
+  booking  Booking? @relation(fields: [bookingId], references: [id], onDelete: Cascade)
+
+  @@index([propertyId, startDate, endDate])
+}
+
+// ---------- Airbnb sync bookkeeping ----------
+model SyncLog {
+  id           String   @id @default(cuid())
+  propertyId   String
+  status       String   // healthy | error
+  message      String?
+  ranAt        DateTime @default(now())
+}
+
+// ---------- One-click comms + billing audit ----------
+enum CommsType {
+  SMS
+  CALL
+  EMAIL
+  BILL
+}
+
+model CommsLog {
+  id        String    @id @default(cuid())
+  clientId  String
+  type      CommsType
+  detail    String?   // e.g. subject, or Stripe link sent
+  sentAt    DateTime  @default(now())
+  client    Client    @relation(fields: [clientId], references: [id], onDelete: Cascade)
+}

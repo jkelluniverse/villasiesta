@@ -1,0 +1,67 @@
+# Villa Siesta — In-House Platform (Next.js + Postgres)
+
+The full booking platform: public marketing site, guest request→approve→pay flow,
+owner portal, payments, Airbnb sync — one Next.js app on Railway backed by our own
+PostgreSQL. This **supersedes** the Google Sheets / Apps Script backend at the repo
+root (kept live until cutover).
+
+## Status
+- **Phase 1 — Foundation:** ✅ Next.js + Prisma + Postgres, seed (Villa Siesta + 22 photos + seasonal pricing + fees), public marketing site ported (brand, carousel, copy), map.
+- **Phase 2 — Guest request:** ✅ live calendar/quote widget → `POST /api/bookings` (transactional, race-safe) → Pending tracker; owner + guest emails.
+- **Phases 3–6** (owner portal, payments/Stripe, calendar+sync, ledger/clients): next.
+
+## Stack
+Next.js 14 (App Router, TS) · Prisma · PostgreSQL · Resend (email, optional) · Stripe (later) · Auth.js (later).
+
+## Local development
+```bash
+cd platform
+cp .env.example .env            # set DATABASE_URL to a local Postgres
+npm install
+npx prisma migrate deploy       # or: npx prisma migrate dev
+npm run db:seed                 # seed Villa Siesta
+npm run dev                     # http://localhost:3000
+```
+
+## Deploy on Railway (cutover)
+The app lives in this `platform/` subdirectory so the current static site at the repo
+root stays live until you switch over. To cut over:
+
+1. **Add a PostgreSQL plugin** to the Railway project (New → Database → PostgreSQL).
+   It provides `DATABASE_URL`.
+2. On the **web service → Settings**: set **Root Directory** to `platform`.
+   The `railway.json` here builds with Nixpacks and starts with
+   `prisma migrate deploy && next start` (migrations run automatically on deploy).
+3. **Variables** (service → Variables): reference the DB and set the rest —
+   ```
+   DATABASE_URL   # Reference → the Postgres plugin's DATABASE_URL
+   APP_URL=https://villasiestasarasota.com
+   NEXTAUTH_SECRET=<openssl rand -base64 32>   # for the owner portal (later phase)
+   NEXTAUTH_URL=https://villasiestasarasota.com
+   OWNER_EMAIL=jacob@nicecityhomes.com
+   NOTIFY_EMAILS=jacob@nicecityhomes.com, DAD_EMAIL
+   RESEND_API_KEY=<optional; blank logs emails to the deploy logs>
+   EMAIL_FROM=Villa Siesta <bookings@villasiestasarasota.com>
+   AIRBNB_ICAL_URL=<optional>
+   # Stripe keys added in the Payments phase
+   ```
+4. **Seed once** after the first successful deploy (Railway → service → open a shell,
+   or run locally against the Railway DATABASE_URL):
+   ```bash
+   npm run db:seed
+   ```
+5. The domain `villasiestasarasota.com` already points at this Railway service —
+   nothing to reprint.
+
+## Data model
+See `prisma/schema.prisma`. Everything is keyed by `propertyId` (multi-property ready).
+Photos are static JPGs in `public/photos/` with labels seeded from `prisma/photos.json`.
+
+## Notes
+- **No double-booking:** every date-consuming write runs inside a Prisma `$transaction`
+  that re-verifies no overlapping PAID/APPROVED booking or owner/Airbnb block exists
+  (`src/lib/availability.ts`). Multiple *pending* requests for the same open dates are
+  allowed by design — the owner approves one.
+- **Tax:** direct bookings make FL + Sarasota tourist/sales tax the owner's responsibility;
+  the `TAX_PERCENT` fee collects it, remittance stays manual.
+- **Email:** without `RESEND_API_KEY`, emails are logged (so the flow works pre-config).

@@ -1,0 +1,134 @@
+[
+  {
+    "file": "/photos/photo-01.jpg",
+    "label": "Living room",
+    "sublabel": "",
+    "sortOrder": 0
+  },
+  {
+    "file": "/photos/photo-02.jpg",
+    "label": "Living room",
+    "sublabel": "",
+    "sortOrder": 1
+  },
+  {
+    "file": "/photos/photo-03.jpg",
+    "label": "Living room",
+    "sublabel": "",
+    "sortOrder": 2
+  },
+  {
+    "file": "/photos/photo-04.jpg",
+    "label": "Living room",
+    "sublabel": "",
+    "sortOrder": 3
+  },
+  {
+    "file": "/photos/photo-05.jpg",
+    "label": "Living room",
+    "sublabel": "",
+    "sortOrder": 4
+  },
+  {
+    "file": "/photos/photo-06.jpg",
+    "label": "Full kitchen",
+    "sublabel": "",
+    "sortOrder": 5
+  },
+  {
+    "file": "/photos/photo-07.jpg",
+    "label": "Full kitchen",
+    "sublabel": "",
+    "sortOrder": 6
+  },
+  {
+    "file": "/photos/photo-08.jpg",
+    "label": "Full kitchen",
+    "sublabel": "",
+    "sortOrder": 7
+  },
+  {
+    "file": "/photos/photo-09.jpg",
+    "label": "Bedroom 1",
+    "sublabel": "King bed",
+    "sortOrder": 8
+  },
+  {
+    "file": "/photos/photo-10.jpg",
+    "label": "Bedroom 2",
+    "sublabel": "Queen bed",
+    "sortOrder": 9
+  },
+  {
+    "file": "/photos/photo-11.jpg",
+    "label": "Bedroom 3",
+    "sublabel": "Queen bed",
+    "sortOrder": 10
+  },
+  {
+    "file": "/photos/photo-12.jpg",
+    "label": "Full bathroom 1",
+    "sublabel": "",
+    "sortOrder": 11
+  },
+  {
+    "file": "/photos/photo-13.jpg",
+    "label": "Full bathroom 1",
+    "sublabel": "",
+    "sortOrder": 12
+  },
+  {
+    "file": "/photos/photo-14.jpg",
+    "label": "Full bathroom 1",
+    "sublabel": "",
+    "sortOrder": 13
+  },
+  {
+    "file": "/photos/photo-15.jpg",
+    "label": "Full bathroom 1",
+    "sublabel": "",
+    "sortOrder": 14
+  },
+  {
+    "file": "/photos/photo-16.jpg",
+    "label": "Full bathroom 2",
+    "sublabel": "",
+    "sortOrder": 15
+  },
+  {
+    "file": "/photos/photo-17.jpg",
+    "label": "Laundry area",
+    "sublabel": "",
+    "sortOrder": 16
+  },
+  {
+    "file": "/photos/photo-18.jpg",
+    "label": "Exterior",
+    "sublabel": "",
+    "sortOrder": 17
+  },
+  {
+    "file": "/photos/photo-19.jpg",
+    "label": "Pool",
+    "sublabel": "",
+    "sortOrder": 18
+  },
+  {
+    "file": "/photos/photo-20.jpg",
+    "label": "Den & office",
+    "sublabel": "",
+    "sortOrder": 19
+  },
+  {
+    "file": "/photos/photo-21.jpg",
+    "label": "Hallway",
+    "sublabel": "",
+    "sortOrder": 20
+  },
+  {
+    "file": "/photos/photo-22.jpg",
+    "label": "Hallway",
+    "sublabel": "",
+    "sortOrder": 21
+  }
+]
