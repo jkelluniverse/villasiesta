@@ -77,7 +77,12 @@ export default function BookingWidget({ slug = 'villa-siesta' }: { slug?: string
     try {
       const res = await fetch('/api/bookings', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ slug, ...form, guests, pet, checkIn, checkOut }),
+        body: JSON.stringify({
+          slug,
+          firstName: form.first, lastName: form.last,      // API field names
+          email: form.email, phone: form.phone, message: form.message,
+          guests, pet, checkIn, checkOut,
+        }),
       });
       const data = await res.json();
       if (!res.ok) { setError(data.message || 'Something went wrong — please try again.'); setSubmitting(false); return; }
