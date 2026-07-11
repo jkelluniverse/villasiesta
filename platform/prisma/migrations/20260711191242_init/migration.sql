@@ -8,10 +8,13 @@ CREATE TYPE "PricingType" AS ENUM ('SEASONAL', 'CUSTOM', 'BLACKOUT', 'MIN_NIGHTS
 CREATE TYPE "FeeType" AS ENUM ('CLEANING', 'PET', 'EXTRA_GUEST', 'TAX_PERCENT', 'CARD_FEE_PERCENT');
 
 -- CreateEnum
-CREATE TYPE "BookingStatus" AS ENUM ('REQUESTED', 'APPROVED', 'PAID', 'CANCELLED', 'EXPIRED');
+CREATE TYPE "BookingStatus" AS ENUM ('REQUESTED', 'APPROVED', 'PARTIALLY_PAID', 'PAID', 'CANCELLED', 'EXPIRED');
 
 -- CreateEnum
 CREATE TYPE "PaymentMethod" AS ENUM ('ACH', 'CARD', 'ZELLE', 'CASHAPP', 'VENMO', 'CHIME');
+
+-- CreateEnum
+CREATE TYPE "PaymentPlan" AS ENUM ('FULL', 'SPLIT');
 
 -- CreateEnum
 CREATE TYPE "BlockSource" AS ENUM ('OWNER', 'AIRBNB', 'BOOKING');
@@ -122,7 +125,14 @@ CREATE TABLE "Booking" (
     "total" DOUBLE PRECISION NOT NULL,
     "status" "BookingStatus" NOT NULL DEFAULT 'REQUESTED',
     "paymentMethod" "PaymentMethod",
-    "stripeSession" TEXT,
+    "paymentPlan" "PaymentPlan" NOT NULL DEFAULT 'FULL',
+    "depositAmount" DOUBLE PRECISION,
+    "balanceAmount" DOUBLE PRECISION,
+    "balanceDueDate" TIMESTAMP(3),
+    "balancePaid" BOOLEAN NOT NULL DEFAULT false,
+    "forteTransactionId" TEXT,
+    "fortePaymethodToken" TEXT,
+    "forteScheduleId" TEXT,
     "holdExpiresAt" TIMESTAMP(3),
     "message" TEXT,
     "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,

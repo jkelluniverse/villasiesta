@@ -123,6 +123,7 @@ model Client {
 enum BookingStatus {
   REQUESTED
   APPROVED
+  PARTIALLY_PAID   // split: deposit received, dates secured, balance scheduled
   PAID
   CANCELLED
   EXPIRED
@@ -135,6 +136,11 @@ enum PaymentMethod {
   CASHAPP
   VENMO
   CHIME
+}
+
+enum PaymentPlan {
+  FULL
+  SPLIT   // 50% now + 50% at check-in − 14 days (stays > 90 days out)
 }
 
 model Booking {
@@ -153,7 +159,15 @@ model Booking {
   total          Float
   status         BookingStatus  @default(REQUESTED)
   paymentMethod  PaymentMethod?
-  stripeSession  String?
+  paymentPlan    PaymentPlan    @default(FULL)
+  depositAmount  Float?         // SPLIT: 50% charged now
+  balanceAmount  Float?         // SPLIT: 50% charged later
+  balanceDueDate DateTime?      // check-in − 14 days
+  balancePaid    Boolean        @default(false)
+  // CSG Forte references
+  forteTransactionId  String?   // trn_ of the deposit/full sale
+  fortePaymethodToken String?   // mth_ stored token for the scheduled balance
+  forteScheduleId     String?   // sch_ if using a Forte Schedule
   holdExpiresAt  DateTime?      // for approved-awaiting-payment holds
   message        String?
   createdAt      DateTime       @default(now())
@@ -211,7 +225,7 @@ model CommsLog {
   id        String    @id @default(cuid())
   clientId  String
   type      CommsType
-  detail    String?   // e.g. subject, or Stripe link sent
+  detail    String?   // e.g. subject, or Forte payment link sent
   sentAt    DateTime  @default(now())
   client    Client    @relation(fields: [clientId], references: [id], onDelete: Cascade)
 }

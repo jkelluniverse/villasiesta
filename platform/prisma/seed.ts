@@ -39,40 +39,36 @@ async function main() {
     },
   });
 
-  // Photos — reset to the manifest so re-seeding stays in sync
-  await prisma.photo.deleteMany({ where: { propertyId: property.id } });
-  await prisma.photo.createMany({
-    data: photos.map((p) => ({
-      propertyId: property.id,
-      url: p.file,
-      label: p.label,
-      sublabel: p.sublabel || null,
-      sortOrder: p.sortOrder,
-    })),
-  });
+  // Idempotent: only seed reference data the first time, so re-running on every
+  // deploy never wipes owner edits (prices/fees changed later in the portal).
 
-  // Seasonal pricing rules (one per month)
-  await prisma.pricingRule.deleteMany({ where: { propertyId: property.id, type: PricingType.SEASONAL } });
-  await prisma.pricingRule.createMany({
-    data: Object.entries(SEASONAL).map(([month, value]) => ({
-      propertyId: property.id,
-      type: PricingType.SEASONAL,
-      month: Number(month),
-      value,
-    })),
-  });
+  if ((await prisma.photo.count({ where: { propertyId: property.id } })) === 0) {
+    await prisma.photo.createMany({
+      data: photos.map((p) => ({
+        propertyId: property.id, url: p.file, label: p.label, sublabel: p.sublabel || null, sortOrder: p.sortOrder,
+      })),
+    });
+  }
 
-  // Fees
-  await prisma.fee.deleteMany({ where: { propertyId: property.id } });
-  await prisma.fee.createMany({
-    data: [
-      { propertyId: property.id, type: FeeType.CLEANING, amount: 300 },
-      { propertyId: property.id, type: FeeType.PET, amount: 250 },
-      { propertyId: property.id, type: FeeType.EXTRA_GUEST, amount: 100, threshold: 6 },
-      { propertyId: property.id, type: FeeType.TAX_PERCENT, amount: 0 },
-      { propertyId: property.id, type: FeeType.CARD_FEE_PERCENT, amount: 3 },
-    ],
-  });
+  if ((await prisma.pricingRule.count({ where: { propertyId: property.id, type: PricingType.SEASONAL } })) === 0) {
+    await prisma.pricingRule.createMany({
+      data: Object.entries(SEASONAL).map(([month, value]) => ({
+        propertyId: property.id, type: PricingType.SEASONAL, month: Number(month), value,
+      })),
+    });
+  }
+
+  if ((await prisma.fee.count({ where: { propertyId: property.id } })) === 0) {
+    await prisma.fee.createMany({
+      data: [
+        { propertyId: property.id, type: FeeType.CLEANING, amount: 300 },
+        { propertyId: property.id, type: FeeType.PET, amount: 250 },
+        { propertyId: property.id, type: FeeType.EXTRA_GUEST, amount: 100, threshold: 6 },
+        { propertyId: property.id, type: FeeType.TAX_PERCENT, amount: 0 },
+        { propertyId: property.id, type: FeeType.CARD_FEE_PERCENT, amount: 3 },
+      ],
+    });
+  }
 
   // Owner user + login. Set OWNER_PASSWORD in the env to control the portal password.
   const ownerEmail = (process.env.OWNER_EMAIL || 'jacob@nicecityhomes.com').trim().toLowerCase();
