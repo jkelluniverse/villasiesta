@@ -243,8 +243,13 @@ const CONFIG = {
 
   .loc{background:var(--gray)}
   .loc .grid{display:grid;grid-template-columns:1fr 1fr;gap:44px;align-items:center}
-  .mapbox{border-radius:var(--r);overflow:hidden;border:1px solid var(--line);box-shadow:var(--shadow);min-height:340px}
+  .mapbox{position:relative;border-radius:var(--r);overflow:hidden;border:1px solid var(--line);box-shadow:var(--shadow);min-height:340px}
   .mapbox iframe{width:100%;height:100%;min-height:340px;border:0;display:block}
+  .map-approx{position:absolute;top:50%;left:50%;width:44%;padding-top:44%;transform:translate(-50%,-58%);
+    border-radius:50%;background:rgba(33,54,119,.14);border:2px solid rgba(33,54,119,.5);pointer-events:none}
+  .map-note{position:absolute;left:12px;right:12px;bottom:12px;background:rgba(255,255,255,.94);color:var(--ink);
+    font-size:.76rem;line-height:1.45;padding:9px 12px;border-radius:var(--r);box-shadow:0 4px 14px -8px rgba(0,0,0,.4);pointer-events:none}
+  .map-note b{color:var(--navy);font-weight:600}
   .loc ul{list-style:none;margin-top:18px}
   .loc li{padding:8px 0;border-bottom:1px solid var(--line);font-size:.95rem;display:flex;justify-content:space-between}
   .loc li b{font-family:'Cormorant Garamond';font-weight:500;font-size:1.1rem;color:var(--navy)}
@@ -439,9 +444,13 @@ const CONFIG = {
       <li><span>Siesta Key Beaches</span><b>~20 min</b></li>
     </ul>
   </div>
-  <!-- 🗺️ Optional: paste your exact map (Google Maps → Share → Embed a map) into src -->
+  <!-- 🗺️ Approximate area only. The exact street address is intentionally NOT in this
+       page — it is stored in the Google Sheet and emailed to guests after their booking
+       is confirmed. Center on the neighborhood/ZIP, never the exact house. -->
   <div class="mapbox">
-    <iframe title="Map of downtown Sarasota, Florida" src="https://www.google.com/maps?q=Downtown+Sarasota,+FL&output=embed" loading="lazy" referrerpolicy="no-referrer-when-downgrade"></iframe>
+    <iframe title="Approximate location — downtown Sarasota (34237), Florida" src="https://www.google.com/maps?q=Sarasota,+FL+34237&z=14&output=embed" loading="lazy" referrerpolicy="no-referrer-when-downgrade"></iframe>
+    <div class="map-approx" aria-hidden="true"></div>
+    <div class="map-note">📍 <b>Approximate area.</b> The exact address is shared privately once your booking is confirmed.</div>
   </div>
 </div></section>
 

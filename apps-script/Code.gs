@@ -361,6 +361,14 @@ function sendPaymentEmail_(s, row) {
     lines.push('');
   }
   lines.push('For ACH or the cash apps, reply to this email and we\'ll send details.');
+  lines.push('');
+  // Exact address is revealed here — only on approval, never on the public site.
+  var addr = String(s.property_address || '').trim();
+  if (addr) {
+    lines.push('Your home:');
+    lines.push('  ' + addr);
+    lines.push('');
+  }
   lines.push('Check-in ' + (s.checkin_time || '4:00 PM') + ' · Check-out ' + (s.checkout_time || '10:00 AM') + '.');
   lines.push('Cancellation policy: ' + (s.cancellation_policy || 'Flexible') + '.');
   lines.push('');
@@ -533,6 +541,7 @@ function setupSheet() {
   var settings = ensureTab_(TAB.settings, ['key', 'value']);
   seedIfEmpty_(settings, [
     ['property_name', 'Villa Siesta'],
+    ['property_address', 'FULL STREET ADDRESS HERE (revealed to guests only after approval)'],
     ['currency', '$'],
     ['min_nights', 7],
     ['max_nights', 20],
