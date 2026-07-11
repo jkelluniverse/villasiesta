@@ -7,8 +7,14 @@ root (kept live until cutover).
 
 ## Status
 - **Phase 1 — Foundation:** ✅ Next.js + Prisma + Postgres, seed (Villa Siesta + 22 photos + seasonal pricing + fees), public marketing site ported (brand, carousel, copy), map.
-- **Phase 2 — Guest request:** ✅ live calendar/quote widget → `POST /api/bookings` (transactional, race-safe) → Pending tracker; owner + guest emails.
-- **Phases 3–6** (owner portal, payments/Stripe, calendar+sync, ledger/clients): next.
+- **Phase 2 — Guest request:** ✅ live calendar/quote widget → `POST /api/bookings` (transactional, race-safe) → Pending tracker; owner + guest emails; live `/booking/[id]` status page.
+- **Phase 3 — Owner portal core:** ✅ Auth.js login (roles OWNER / VIEWER); Command Center (net/occupancy/YTD/next-payout metrics + Needs-attention queue + 30-night occupancy strip + upcoming arrivals) reading live from Postgres; **approve/decline** as transactional server actions (approve consumes the dates via a `CalendarBlock`-equivalent hold and emails the guest a finalize link); one-click email/call/text on each row.
+- **Phases 4–6** (Stripe payments, calendar+sync, ledger/clients): next.
+
+### Owner portal
+- Lives at **`/owner`** (behind Auth.js middleware; `/owner/login` is public). The public site stays open.
+- Set `OWNER_PASSWORD` (and optionally `DAD_EMAIL` + `DAD_PASSWORD` for a read-only viewer) **before seeding** — the seed hashes them into the `User` table. Change the password later by re-seeding with a new value, or updating the `User.passwordHash`.
+- `NEXTAUTH_SECRET` and `NEXTAUTH_URL` are required for login to work.
 
 ## Stack
 Next.js 14 (App Router, TS) · Prisma · PostgreSQL · Resend (email, optional) · Stripe (later) · Auth.js (later).

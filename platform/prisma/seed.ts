@@ -1,4 +1,5 @@
 import { PrismaClient, PricingType, FeeType, Role } from '@prisma/client';
+import bcrypt from 'bcryptjs';
 import photos from './photos.json';
 
 const prisma = new PrismaClient();
@@ -73,15 +74,29 @@ async function main() {
     ],
   });
 
-  // Owner user (password/login wired in the Auth phase)
-  const ownerEmail = (process.env.OWNER_EMAIL || 'jacob@nicecityhomes.com').trim();
+  // Owner user + login. Set OWNER_PASSWORD in the env to control the portal password.
+  const ownerEmail = (process.env.OWNER_EMAIL || 'jacob@nicecityhomes.com').trim().toLowerCase();
+  const ownerPassword = process.env.OWNER_PASSWORD || 'changeme-owner';
+  const ownerHash = await bcrypt.hash(ownerPassword, 10);
   await prisma.user.upsert({
     where: { email: ownerEmail },
-    update: {},
-    create: { email: ownerEmail, name: 'Jacob', role: Role.OWNER },
+    update: { passwordHash: ownerHash, role: Role.OWNER },
+    create: { email: ownerEmail, name: 'Jacob', role: Role.OWNER, passwordHash: ownerHash },
   });
 
+  // Optional read-only viewer (dad). Set DAD_EMAIL + DAD_PASSWORD to enable.
+  const dadEmail = (process.env.DAD_EMAIL || '').trim().toLowerCase();
+  if (dadEmail && process.env.DAD_PASSWORD) {
+    const dadHash = await bcrypt.hash(process.env.DAD_PASSWORD, 10);
+    await prisma.user.upsert({
+      where: { email: dadEmail },
+      update: { passwordHash: dadHash, role: Role.VIEWER },
+      create: { email: dadEmail, name: 'Dad', role: Role.VIEWER, passwordHash: dadHash },
+    });
+  }
+
   console.log(`Seeded property "${property.name}" with ${photos.length} photos, 12 seasonal rates, 5 fees.`);
+  console.log(`Owner login: ${ownerEmail} / (OWNER_PASSWORD env${process.env.OWNER_PASSWORD ? '' : ' — default "changeme-owner"'})`);
 }
 
 main()

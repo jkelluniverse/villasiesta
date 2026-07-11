@@ -162,3 +162,6 @@ form.req .btn-navy{width:100%;margin-top:6px}
 .tnode .ts{color:var(--muted);font-size:.82rem}
 .tnode.future .tt,.tnode.future .ts{opacity:.5}
 .track-link{display:inline-block;margin-top:10px;color:var(--navy);font-weight:600;font-size:.85rem}
+.badge.approved{background:#E7F1EB;color:#2C6E52}
+.badge.secured{background:#E9EDF7;color:#213677}
+.badge.declined{background:#F6EAE8;color:#9C4A46}
