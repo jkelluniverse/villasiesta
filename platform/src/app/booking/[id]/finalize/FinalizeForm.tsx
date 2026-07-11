@@ -15,7 +15,7 @@ function detectCardType(num: string): string {
   return 'visa';
 }
 
-declare global { interface Window { forte?: { createToken: (o: Record<string, unknown>) => { success: (cb: (r: { onetime_token?: string; token?: string }) => void) => { error: (cb: (e: unknown) => void) => void } } } } }
+declare global { interface Window { jQuery?: unknown; forte?: { createToken: (o: Record<string, unknown>) => { success: (cb: (r: { onetime_token?: string; token?: string }) => void) => { error: (cb: (e: unknown) => void) => void } } } } }
 
 export default function FinalizeForm(props: {
   bookingId: string; currency: string; achTotal: number; cardTotal: number;
@@ -29,15 +29,31 @@ export default function FinalizeForm(props: {
   const [err, setErr] = useState('');
   const [forteReady, setForteReady] = useState(false);
 
-  // Load Forte.js only when configured (client-side tokenization; card data never hits our server).
+  // Load Forte.js only when configured (client-side tokenization; card data never
+  // hits our server). Forte.js v1 REQUIRES jQuery on the page — its
+  // .success()/.error() chaining is built on jQuery Deferreds — so load that first.
   useEffect(() => {
     if (!props.forteLoginId) return;
-    const src = props.forteEnv === 'live' ? 'https://api.forte.net/api/js/v1' : 'https://sandbox.forte.net/api/js/v1';
-    const s = document.createElement('script'); s.src = src; s.async = true;
-    s.onload = () => setForteReady(true);
-    s.onerror = () => setErr('Could not load the secure payment library. Refresh and try again.');
-    document.body.appendChild(s);
-    return () => { s.remove(); };
+    let cancelled = false;
+    const forteSrc = props.forteEnv === 'live' ? 'https://api.forte.net/js/v1' : 'https://sandbox.forte.net/api/js/v1';
+    const load = (src: string) => new Promise<void>((resolve, reject) => {
+      const s = document.createElement('script');
+      s.src = src; s.async = true;
+      s.onload = () => resolve();
+      s.onerror = () => reject(new Error('failed to load ' + src));
+      document.body.appendChild(s);
+    });
+    (async () => {
+      try {
+        if (!window.jQuery) await load('https://code.jquery.com/jquery-3.7.1.min.js');
+        await load(forteSrc);
+        if (!cancelled) setForteReady(true);
+      } catch (e) {
+        console.error('[forte.js]', e);
+        if (!cancelled) setErr('Could not load the secure payment library. Refresh and try again.');
+      }
+    })();
+    return () => { cancelled = true; };
   }, [props.forteLoginId, props.forteEnv]);
 
   const isManual = MANUAL.includes(method);
@@ -72,7 +88,16 @@ export default function FinalizeForm(props: {
           .success((r) => post(r.onetime_token || r.token))
           .error(() => { setErr('Card could not be verified. Check the details and try again.'); setBusy(false); });
         return;
-      } catch { setErr('Payment could not start.'); setBusy(false); return; }
+      } catch (ex) {
+        console.error('[forte.js] createToken threw', ex);
+        setErr('Payment could not start — ' + ((ex as Error)?.message || 'unknown error') + '. Refresh and try again.');
+        setBusy(false); return;
+      }
+    }
+    // Forte configured but library not ready yet → don't attempt a token-less charge.
+    if (props.forteConfigured && props.forteLoginId) {
+      setErr('The secure payment form is still loading — give it a second and try again.');
+      setBusy(false); return;
     }
     // Mock/dev path (no Forte creds): charge is simulated server-side.
     await post(undefined);
