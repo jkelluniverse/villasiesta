@@ -39,7 +39,7 @@ export async function getDashboard(slug: string): Promise<Dashboard | null> {
   const now = new Date();
   const y = now.getUTCFullYear();
   const m = now.getUTCMonth();
-  const consuming = bookings.filter((b) => b.status === BookingStatus.APPROVED || b.status === BookingStatus.PAID);
+  const consuming = bookings.filter((b) => b.status === BookingStatus.APPROVED || b.status === BookingStatus.PAID || b.status === BookingStatus.PARTIALLY_PAID);
 
   const ledgerForMonth = (yy: number, mm: number) =>
     consuming.filter((b) => { const d = b.checkIn; return d.getUTCFullYear() === yy && d.getUTCMonth() === mm; })

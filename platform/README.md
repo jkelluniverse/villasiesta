@@ -9,7 +9,12 @@ root (kept live until cutover).
 - **Phase 1 — Foundation:** ✅ Next.js + Prisma + Postgres, seed (Villa Siesta + 22 photos + seasonal pricing + fees), public marketing site ported (brand, carousel, copy), map.
 - **Phase 2 — Guest request:** ✅ live calendar/quote widget → `POST /api/bookings` (transactional, race-safe) → Pending tracker; owner + guest emails; live `/booking/[id]` status page.
 - **Phase 3 — Owner portal core:** ✅ Auth.js login (roles OWNER / VIEWER); Command Center (net/occupancy/YTD/next-payout metrics + Needs-attention queue + 30-night occupancy strip + upcoming arrivals) reading live from Postgres; **approve/decline** as transactional server actions (approve consumes the dates via a `CalendarBlock`-equivalent hold and emails the guest a finalize link); one-click email/call/text on each row.
-- **Phases 4–6** (Stripe payments, calendar+sync, ledger/clients): next.
+- **Phase 4 — Payments (CSG Forte):** ✅ branded `/booking/[id]/finalize` page (Forte.js client-side tokenization; card data never hits our server), `POST /api/bookings/[id]/finalize` charges via Forte REST `sale` — **pay in full**, or **50/50 split** (deposit now + stored-token balance scheduled for check-in − 14 days) when check-in is >90 days out; echeck (ACH, no fee) first, card (+3%), manual Zelle/Cash App/Venmo/Chime surfaced; `POST /api/forte/webhook` idempotently confirms `PAID`/`PARTIALLY_PAID`; both paths create the booking's `CalendarBlock` inside a transaction (final double-booking guard, self-excluded) and email a receipt.
+- **Phases 5–6** (calendar+sync, ledger/clients): next.
+
+### Payments (Forte) — mock mode
+Until the Forte env vars are set, payments run in **MOCK mode**: the finalize button simulates an approved charge (clearly logged, receipt tagged `[TEST/MOCK PAYMENT]`) so the full finalize → PAID → calendar-lock loop works before the merchant account is wired. Set these to go live (Phase-4 vars, all from Forte's Dex portal):
+`FORTE_API_ACCESS_ID`, `FORTE_API_SECURE_KEY`, `FORTE_ORGANIZATION_ID`, `FORTE_LOCATION_ID`, `FORTE_ENV` (`sandbox`|`live`), `NEXT_PUBLIC_FORTE_API_LOGIN_ID`. Point Forte's webhook at `https://villasiestasarasota.com/api/forte/webhook`.
 
 ### Owner portal
 - Lives at **`/owner`** (behind Auth.js middleware; `/owner/login` is public). The public site stays open.

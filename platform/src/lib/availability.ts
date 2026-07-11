@@ -7,15 +7,17 @@ export type BlockedRange = { start: string; end: string; source: 'booking' | 'ow
 // A Prisma transaction client or the base client — both expose the model queries we use.
 type Db = PrismaClient | Prisma.TransactionClient;
 
-/** Bookings that hold dates: PAID always; APPROVED only while the hold is still live. */
-function activeBookingWhere(propertyId: string, ci: Date, co: Date): Prisma.BookingWhereInput {
+/** Bookings that hold dates: PAID/PARTIALLY_PAID always; APPROVED while the hold is live. */
+function activeBookingWhere(propertyId: string, ci: Date, co: Date, excludeBookingId?: string): Prisma.BookingWhereInput {
   const now = new Date();
   return {
     propertyId,
+    ...(excludeBookingId ? { id: { not: excludeBookingId } } : {}),
     checkIn: { lt: co },
     checkOut: { gt: ci },
     OR: [
       { status: BookingStatus.PAID },
+      { status: BookingStatus.PARTIALLY_PAID },
       { status: BookingStatus.APPROVED, OR: [{ holdExpiresAt: null }, { holdExpiresAt: { gt: now } }] },
     ],
   };
@@ -24,14 +26,15 @@ function activeBookingWhere(propertyId: string, ci: Date, co: Date): Prisma.Book
 /**
  * True if [checkIn, checkOut) is free of any PAID/live-APPROVED booking and any
  * owner/airbnb calendar block. Pass a transaction client to make the check
- * part of an atomic write (the double-booking safeguard).
+ * part of an atomic write (the double-booking safeguard). `excludeBookingId`
+ * skips the booking being finalized so its own hold doesn't count as a conflict.
  */
-export async function isRangeAvailable(db: Db, propertyId: string, checkInKey: string, checkOutKey: string): Promise<boolean> {
+export async function isRangeAvailable(db: Db, propertyId: string, checkInKey: string, checkOutKey: string, excludeBookingId?: string): Promise<boolean> {
   if (!checkInKey || !checkOutKey || checkInKey >= checkOutKey) return false;
   const ci = parseKey(checkInKey);
   const co = parseKey(checkOutKey);
 
-  const bookingClash = await db.booking.findFirst({ where: activeBookingWhere(propertyId, ci, co), select: { id: true } });
+  const bookingClash = await db.booking.findFirst({ where: activeBookingWhere(propertyId, ci, co, excludeBookingId), select: { id: true } });
   if (bookingClash) return false;
 
   const blockClash = await db.calendarBlock.findFirst({
@@ -47,8 +50,8 @@ export async function isRangeAvailable(db: Db, propertyId: string, checkInKey: s
 }
 
 /** Throws if the range is taken — call inside a $transaction before consuming dates. */
-export async function assertRangeAvailable(db: Db, propertyId: string, checkInKey: string, checkOutKey: string): Promise<void> {
-  const ok = await isRangeAvailable(db, propertyId, checkInKey, checkOutKey);
+export async function assertRangeAvailable(db: Db, propertyId: string, checkInKey: string, checkOutKey: string, excludeBookingId?: string): Promise<void> {
+  const ok = await isRangeAvailable(db, propertyId, checkInKey, checkOutKey, excludeBookingId);
   if (!ok) {
     const err = new Error('DATES_UNAVAILABLE');
     (err as Error & { code?: string }).code = 'DATES_UNAVAILABLE';
@@ -65,6 +68,7 @@ export async function getBlockedRanges(propertyId: string): Promise<BlockedRange
         propertyId,
         OR: [
           { status: BookingStatus.PAID },
+          { status: BookingStatus.PARTIALLY_PAID },
           { status: BookingStatus.APPROVED, OR: [{ holdExpiresAt: null }, { holdExpiresAt: { gt: now } }] },
         ],
       },

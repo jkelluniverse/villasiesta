@@ -53,8 +53,8 @@ export default async function BookingStatusPage({ params }: { params: { id: stri
           <div style={{ marginTop: 14 }}>
             <div className="quote" style={{ marginTop: 0 }}>
               <div className="r"><span>Total to secure</span><b className="tnum" style={{ fontFamily: 'var(--font-display)', fontSize: '1.3rem', color: 'var(--navy)' }}>{cur}{Math.round(b.total).toLocaleString()}</b></div>
-              <div className="r hint">Finalize & payment options are coming shortly — you’ll get a secure link by email.</div>
             </div>
+            <Link href={`/booking/${b.id}/finalize`} className="btn btn-navy" style={{ width: '100%', marginTop: 14 }}>Finalize &amp; secure your stay →</Link>
           </div>
         ) : null}
       </div>
