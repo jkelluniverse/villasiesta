@@ -71,17 +71,22 @@ export async function createSale(input: SaleInput): Promise<SaleResult> {
   }
 
   try {
-    const res = await fetch(`${baseUrl()}/organizations/${org}/locations/${loc}/transactions`, {
-      method: 'POST', headers: authHeaders(), body: JSON.stringify(body),
-    });
-    const data = await res.json().catch(() => ({}));
-    // Forte returns response_desc "APPROVED" and a transaction_id on success.
-    const approved = res.ok && (data?.response?.response_code === 'A01' || /approved/i.test(data?.response?.response_desc || ''));
+    const url = `${baseUrl()}/organizations/${org}/locations/${loc}/transactions`;
+    const res = await fetch(url, { method: 'POST', headers: authHeaders(), body: JSON.stringify(body) });
+    const text = await res.text();
+    let data: Record<string, unknown> = {};
+    try { data = JSON.parse(text); } catch { /* non-JSON error body */ }
+    const response = (data.response || {}) as { response_code?: string; response_desc?: string };
+    // Forte returns response_code "A01" (TEST APPROVAL / APPROVED) on success.
+    const approved = res.ok && (response.response_code === 'A01' || /approv/i.test(response.response_desc || ''));
+    console.log(`[forte] sale ${res.status} code=${response.response_code || '-'} desc=${response.response_desc || '-'} txn=${data.transaction_id || '-'}`);
     if (!approved) {
-      return { ok: false, mock: false, error: data?.response?.response_desc || `Forte error ${res.status}` };
+      console.error('[forte] sale NOT approved. Raw response:', text.slice(0, 800));
+      return { ok: false, mock: false, error: response.response_desc || `Forte HTTP ${res.status}: ${text.slice(0, 200)}` };
     }
-    return { ok: true, mock: false, transactionId: data.transaction_id, paymethodToken: data.paymethod_token };
+    return { ok: true, mock: false, transactionId: data.transaction_id as string, paymethodToken: data.paymethod_token as string | undefined };
   } catch (e) {
+    console.error('[forte] sale request failed', e);
     return { ok: false, mock: false, error: (e as Error).message };
   }
 }

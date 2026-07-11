@@ -18,8 +18,11 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
 
   const result = await finalizeBooking({ bookingId: params.id, ...parsed.data });
   if (!result.ok) {
+    const known = result.error === 'dates_unavailable' || result.error === 'not_finalizable' || result.error === 'not_found';
     const code = result.error === 'dates_unavailable' ? 409 : result.error === 'not_finalizable' ? 400 : 402;
-    return NextResponse.json({ error: result.error, message: paymentMessage(result.error) }, { status: code });
+    // In sandbox, pass the raw Forte error back so integration issues are visible.
+    const detail = process.env.FORTE_ENV === 'sandbox' && !known ? result.error : undefined;
+    return NextResponse.json({ error: known ? result.error : 'payment_failed', message: paymentMessage(result.error), detail }, { status: code });
   }
   return NextResponse.json({ ok: true, status: result.status, mock: result.mock });
 }

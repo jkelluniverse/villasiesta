@@ -5,6 +5,16 @@ type Method = 'ach' | 'card' | 'zelle' | 'cashapp' | 'venmo' | 'chime';
 const MANUAL: Method[] = ['zelle', 'cashapp', 'venmo', 'chime'];
 const money = (c: string, n: number) => c + Math.round(n).toLocaleString();
 
+// Forte card_type codes.
+function detectCardType(num: string): string {
+  if (/^4/.test(num)) return 'visa';
+  if (/^(5[1-5]|2[2-7])/.test(num)) return 'mast';
+  if (/^3[47]/.test(num)) return 'amex';
+  if (/^(6011|65|64[4-9])/.test(num)) return 'disc';
+  if (/^3(0[0-5]|[68])/.test(num)) return 'diners';
+  return 'visa';
+}
+
 declare global { interface Window { forte?: { createToken: (o: Record<string, unknown>) => { success: (cb: (r: { onetime_token?: string; token?: string }) => void) => { error: (cb: (e: unknown) => void) => void } } } } }
 
 export default function FinalizeForm(props: {
@@ -22,9 +32,10 @@ export default function FinalizeForm(props: {
   // Load Forte.js only when configured (client-side tokenization; card data never hits our server).
   useEffect(() => {
     if (!props.forteLoginId) return;
-    const src = props.forteEnv === 'live' ? 'https://api.forte.net/js/forte.min.js' : 'https://sandbox.forte.net/js/forte.min.js';
+    const src = props.forteEnv === 'live' ? 'https://api.forte.net/api/js/v1' : 'https://sandbox.forte.net/api/js/v1';
     const s = document.createElement('script'); s.src = src; s.async = true;
     s.onload = () => setForteReady(true);
+    s.onerror = () => setErr('Could not load the secure payment library. Refresh and try again.');
     document.body.appendChild(s);
     return () => { s.remove(); };
   }, [props.forteLoginId, props.forteEnv]);
@@ -52,7 +63,8 @@ export default function FinalizeForm(props: {
         const payload: Record<string, unknown> = { api_login_id: props.forteLoginId };
         if (method === 'card') {
           const [m, y] = card.exp.split('/');
-          Object.assign(payload, { card_type: 'visa', account_number: card.number.replace(/\s/g, ''), expire_month: Number(m), expire_year: Number(y?.length === 2 ? '20' + y : y), cvv: card.cvv });
+          const num = card.number.replace(/\s/g, '');
+          Object.assign(payload, { card_type: detectCardType(num), card_number: num, expire_month: Number(m), expire_year: Number(y?.length === 2 ? '20' + y : y), cvv: card.cvv });
         } else {
           Object.assign(payload, { account_number: card.account, routing_number: card.routing, account_type: 'checking' });
         }
