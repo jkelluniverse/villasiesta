@@ -15,7 +15,7 @@ function detectCardType(num: string): string {
   return 'visa';
 }
 
-declare global { interface Window { jQuery?: unknown; forte?: { createToken: (o: Record<string, unknown>) => { success: (cb: (r: { onetime_token?: string; token?: string }) => void) => { error: (cb: (e: unknown) => void) => void } } } } }
+declare global { interface Window { jQuery?: unknown; forte?: { createToken: (o: Record<string, unknown>) => { success: (cb: (r: { one_time_token?: string; onetime_token?: string; token?: string }) => void) => { error: (cb: (e: unknown) => void) => void } } } } }
 
 export default function FinalizeForm(props: {
   bookingId: string; currency: string; achTotal: number; cardTotal: number;
@@ -66,7 +66,11 @@ export default function FinalizeForm(props: {
       body: JSON.stringify({ method: method === 'card' ? 'card' : 'ach', plan, oneTimeToken }),
     });
     const data = await res.json();
-    if (!res.ok) { setErr(data.message || 'Payment failed.'); setBusy(false); return; }
+    if (!res.ok) {
+      // In sandbox the API includes the raw processor error as `detail` — show it.
+      setErr((data.message || 'Payment failed.') + (data.detail ? ` [${data.detail}]` : ''));
+      setBusy(false); return;
+    }
     window.location.href = `/booking/${props.bookingId}`;
   }
 
@@ -88,8 +92,14 @@ export default function FinalizeForm(props: {
           Object.assign(payload, { account_number: card.account, routing_number: card.routing, account_type: 'checking' });
         }
         window.forte.createToken(payload)
-          .success((r) => post(r.onetime_token || r.token))
-          .error(() => { setErr('Card could not be verified. Check the details and try again.'); setBusy(false); });
+          // Forte.js returns the token as `one_time_token` (ott_...).
+          .success((r) => post(r.one_time_token || r.onetime_token || r.token))
+          .error((fe) => {
+            console.error('[forte.js] tokenization error', fe);
+            const msg = (fe as { response_description?: string })?.response_description;
+            setErr(msg ? `Card could not be verified: ${msg}` : 'Card could not be verified. Check the details and try again.');
+            setBusy(false);
+          });
         return;
       } catch (ex) {
         console.error('[forte.js] createToken threw', ex);
