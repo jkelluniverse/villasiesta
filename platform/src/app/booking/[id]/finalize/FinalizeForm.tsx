@@ -78,9 +78,12 @@ export default function FinalizeForm(props: {
       try {
         const payload: Record<string, unknown> = { api_login_id: props.forteLoginId };
         if (method === 'card') {
-          const [m, y] = card.exp.split('/');
+          // Forte.js runs string ops (.replace) on every field — all values MUST be strings.
+          const [mRaw, yRaw] = card.exp.split('/');
+          const m = (mRaw || '').trim().padStart(2, '0');
+          const y = (yRaw || '').trim();
           const num = card.number.replace(/\s/g, '');
-          Object.assign(payload, { card_type: detectCardType(num), card_number: num, expire_month: Number(m), expire_year: Number(y?.length === 2 ? '20' + y : y), cvv: card.cvv });
+          Object.assign(payload, { card_type: detectCardType(num), card_number: num, expire_month: m, expire_year: y.length === 2 ? '20' + y : y, cvv: card.cvv.trim() });
         } else {
           Object.assign(payload, { account_number: card.account, routing_number: card.routing, account_type: 'checking' });
         }
