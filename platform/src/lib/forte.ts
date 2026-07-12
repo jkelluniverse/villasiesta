@@ -60,11 +60,13 @@ export async function createSale(input: SaleInput): Promise<SaleResult> {
     authorization_amount: Number(input.amountDollars.toFixed(2)),
     order_number: input.orderNumber,
   };
-  // Forte's docs: a paymethod token "can exist as either a permanent token
-  // (mth_) or a one-time-use token (ott_)" — both go in paymethod_token.
+  // Route the token by type: stored mth_ tokens go in paymethod_token; the
+  // ott_ tokens Forte.js mints go in one_time_token (paymethod_token rejects
+  // their format — "Transaction from a One-Time Token" is its own request shape).
   const token = input.paymethodToken || input.oneTimeToken;
-  if (token) body.paymethod_token = token;
-  else return { ok: false, mock: false, error: 'missing_payment_token' };
+  if (!token) return { ok: false, mock: false, error: 'missing_payment_token' };
+  if (token.startsWith('ott_')) body.one_time_token = token;
+  else body.paymethod_token = token;
   if (input.saveToken) body.save_token = true;
   if (input.billing) {
     body.billing_address = {
