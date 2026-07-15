@@ -10,6 +10,7 @@
     "db:migrate": "prisma migrate deploy",
     "db:seed": "tsx prisma/seed.ts",
     "sweep": "tsx scripts/balance-sweep.ts",
+    "email:test": "tsx scripts/email-test.ts",
     "lint": "next lint",
     "typecheck": "tsc --noEmit"
   },
