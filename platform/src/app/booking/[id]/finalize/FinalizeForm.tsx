@@ -1,73 +1,86 @@
 'use client';
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 
 type Method = 'ach' | 'card' | 'zelle' | 'cashapp' | 'venmo' | 'chime';
 const MANUAL: Method[] = ['zelle', 'cashapp', 'venmo', 'chime'];
 const money = (c: string, n: number) => c + Math.round(n).toLocaleString();
 
-// Forte card_type codes.
-function detectCardType(num: string): string {
-  if (/^4/.test(num)) return 'visa';
-  if (/^(5[1-5]|2[2-7])/.test(num)) return 'mast';
-  if (/^3[47]/.test(num)) return 'amex';
-  if (/^(6011|65|64[4-9])/.test(num)) return 'disc';
-  if (/^3(0[0-5]|[68])/.test(num)) return 'diners';
-  return 'visa';
-}
-
-declare global { interface Window { jQuery?: unknown; forte?: { createToken: (o: Record<string, unknown>) => { success: (cb: (r: { one_time_token?: string; onetime_token?: string; token?: string }) => void) => { error: (cb: (e: unknown) => void) => void } } } } }
+// Minimal Web Payments SDK surface we use.
+type SqTokenResult = { status: string; token?: string; errors?: { message?: string }[] };
+type SqCard = { attach: (sel: string) => Promise<void>; tokenize: () => Promise<SqTokenResult>; destroy?: () => Promise<void> };
+type SqAch = { tokenize: (o: { accountHolderName: string; intent?: string; total?: { amount: number; currencyCode: string } }) => Promise<SqTokenResult> };
+type SqPayments = {
+  card: () => Promise<SqCard>;
+  ach: () => Promise<SqAch>;
+  verifyBuyer: (token: string, details: Record<string, unknown>) => Promise<{ token?: string } | null>;
+};
+declare global { interface Window { Square?: { payments: (appId: string, locationId: string) => SqPayments } } }
 
 export default function FinalizeForm(props: {
-  bookingId: string; currency: string; achTotal: number; cardTotal: number;
-  splitEligible: boolean; forteConfigured: boolean; forteLoginId: string; forteEnv: string;
+  bookingId: string; currency: string; baseTotal: number; cardTotal: number; cardPct: number;
+  splitEligible: boolean; guestName: string; squareConfigured: boolean; squareEnv: string;
+  appId: string; locationId: string;
 }) {
   const { currency: cur } = props;
   const [method, setMethod] = useState<Method>('ach');
   const [plan, setPlan] = useState<'full' | 'split'>('full');
-  const [card, setCard] = useState({ number: '', exp: '', cvv: '', routing: '', account: '' });
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState('');
-  const [forteReady, setForteReady] = useState(false);
+  const [notice, setNotice] = useState('');
+  const [sdkReady, setSdkReady] = useState(false);
+  const paymentsRef = useRef<SqPayments | null>(null);
+  const cardRef = useRef<SqCard | null>(null);
+  const cardAttached = useRef(false);
 
-  // Load Forte.js only when configured (client-side tokenization; card data never
-  // hits our server). Forte.js v1 REQUIRES jQuery on the page — its
-  // .success()/.error() chaining is built on jQuery Deferreds — so load that first.
+  const useSquare = props.squareConfigured && !!props.appId && !!props.locationId;
+
+  // Load the Web Payments SDK and init payments once.
   useEffect(() => {
-    if (!props.forteLoginId) return;
-    let cancelled = false;
-    const forteSrc = props.forteEnv === 'live' ? 'https://api.forte.net/js/v1' : 'https://sandbox.forte.net/api/js/v1';
-    const load = (src: string) => new Promise<void>((resolve, reject) => {
-      const s = document.createElement('script');
-      s.src = src; s.async = true;
-      s.onload = () => resolve();
-      s.onerror = () => reject(new Error('failed to load ' + src));
-      document.body.appendChild(s);
-    });
-    (async () => {
+    if (!useSquare) return;
+    const src = props.squareEnv === 'production' ? 'https://web.squarecdn.com/v1/square.js' : 'https://sandbox.web.squarecdn.com/v1/square.js';
+    const s = document.createElement('script');
+    s.src = src; s.async = true;
+    s.onload = async () => {
       try {
-        if (!window.jQuery) await load('https://code.jquery.com/jquery-3.7.1.min.js');
-        await load(forteSrc);
-        if (!cancelled) setForteReady(true);
+        paymentsRef.current = window.Square!.payments(props.appId, props.locationId);
+        setSdkReady(true);
       } catch (e) {
-        console.error('[forte.js]', e);
-        if (!cancelled) setErr('Could not load the secure payment library. Refresh and try again.');
+        console.error('[square-sdk] init failed', e);
+        setErr('Could not start the secure payment form. Refresh and try again.');
+      }
+    };
+    s.onerror = () => setErr('Could not load the secure payment library. Refresh and try again.');
+    document.body.appendChild(s);
+  }, [useSquare, props.appId, props.locationId, props.squareEnv]);
+
+  // Attach the card element whenever the card method is selected.
+  useEffect(() => {
+    (async () => {
+      if (!useSquare || !sdkReady || method !== 'card' || cardAttached.current) return;
+      try {
+        cardRef.current = await paymentsRef.current!.card();
+        await cardRef.current.attach('#sq-card');
+        cardAttached.current = true;
+      } catch (e) {
+        console.error('[square-sdk] card attach failed', e);
+        setErr('Could not display the card form. Refresh and try again.');
       }
     })();
-    return () => { cancelled = true; };
-  }, [props.forteLoginId, props.forteEnv]);
+  }, [useSquare, sdkReady, method]);
 
   const isManual = MANUAL.includes(method);
-  const total = method === 'card' ? props.cardTotal : props.achTotal;
-  const showTotal = plan === 'split' ? Math.round(total / 2) : total;
+  const total = method === 'card' ? props.cardTotal : props.baseTotal;
+  const showSplit = props.splitEligible && method === 'card';   // split runs on a card
+  const effectivePlan = showSplit ? plan : 'full';
+  const showTotal = effectivePlan === 'split' ? Math.round(total / 2) : total;
 
-  async function post(oneTimeToken?: string) {
+  async function post(sourceId?: string, verificationToken?: string) {
     const res = await fetch(`/api/bookings/${props.bookingId}/finalize`, {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ method: method === 'card' ? 'card' : 'ach', plan, oneTimeToken }),
+      body: JSON.stringify({ method: method === 'card' ? 'card' : 'ach', plan: effectivePlan, sourceId, verificationToken }),
     });
     const data = await res.json();
     if (!res.ok) {
-      // In sandbox the API includes the raw processor error as `detail` — show it.
       setErr((data.message || 'Payment failed.') + (data.detail ? ` [${data.detail}]` : ''));
       setBusy(false); return;
     }
@@ -77,46 +90,54 @@ export default function FinalizeForm(props: {
   async function pay(e: React.FormEvent) {
     e.preventDefault();
     setErr(''); setBusy(true);
-    // Forte.js tokenization path (when configured + loaded)
-    if (props.forteLoginId && window.forte && forteReady) {
-      try {
-        const payload: Record<string, unknown> = { api_login_id: props.forteLoginId };
-        if (method === 'card') {
-          // Forte.js runs string ops (.replace) on every field — all values MUST be strings.
-          const [mRaw, yRaw] = card.exp.split('/');
-          const m = (mRaw || '').trim().padStart(2, '0');
-          const y = (yRaw || '').trim();
-          const num = card.number.replace(/\s/g, '');
-          Object.assign(payload, { card_type: detectCardType(num), card_number: num, expire_month: m, expire_year: y.length === 2 ? '20' + y : y, cvv: card.cvv.trim() });
-        } else {
-          Object.assign(payload, { account_number: card.account, routing_number: card.routing, account_type: 'checking' });
-        }
-        window.forte.createToken(payload)
-          // Forte.js returns the token as `one_time_token` (ott_...).
-          .success((r) => post(r.one_time_token || r.onetime_token || r.token))
-          .error((fe) => {
-            console.error('[forte.js] tokenization error', fe);
-            const msg = (fe as { response_description?: string })?.response_description;
-            setErr(msg ? `Card could not be verified: ${msg}` : 'Card could not be verified. Check the details and try again.');
-            setBusy(false);
-          });
-        return;
-      } catch (ex) {
-        console.error('[forte.js] createToken threw', ex);
-        setErr('Payment could not start — ' + ((ex as Error)?.message || 'unknown error') + '. Refresh and try again.');
+
+    // Mock/dev path — Square not configured: simulate server-side.
+    if (!useSquare) { await post(undefined); return; }
+    if (!sdkReady || !paymentsRef.current) { setErr('The secure payment form is still loading — try again in a moment.'); setBusy(false); return; }
+
+    try {
+      let tokenRes: SqTokenResult;
+      if (method === 'card') {
+        if (!cardRef.current) { setErr('Card form not ready — try again in a moment.'); setBusy(false); return; }
+        tokenRes = await cardRef.current.tokenize();
+      } else {
+        setNotice('Opening your bank connection…');
+        const ach = await paymentsRef.current.ach();
+        tokenRes = await ach.tokenize({
+          accountHolderName: props.guestName || 'Guest',
+          intent: 'CHARGE',
+          total: { amount: Math.round(showTotal * 100), currencyCode: 'USD' },
+        });
+        setNotice('');
+      }
+      if (tokenRes.status !== 'OK' || !tokenRes.token) {
+        const detail = tokenRes.errors?.map((x) => x.message).filter(Boolean).join('; ');
+        setErr(detail ? `Payment details could not be verified: ${detail}` : 'Payment was cancelled or could not be verified.');
         setBusy(false); return;
       }
+
+      // Split needs buyer verification so the card can be stored for the balance.
+      let verificationToken: string | undefined;
+      if (effectivePlan === 'split' && method === 'card') {
+        const [givenName, ...rest] = (props.guestName || 'Guest').split(' ');
+        const v = await paymentsRef.current.verifyBuyer(tokenRes.token, {
+          amount: String(showTotal.toFixed(2)),
+          currencyCode: 'USD',
+          intent: 'STORE',
+          billingContact: { givenName, familyName: rest.join(' ') || undefined },
+        });
+        verificationToken = v?.token;
+      }
+
+      await post(tokenRes.token, verificationToken);
+    } catch (ex) {
+      console.error('[square-sdk] pay failed', ex);
+      setErr('Payment could not start — ' + ((ex as Error)?.message || 'unknown error'));
+      setBusy(false);
     }
-    // Forte configured but library not ready yet → don't attempt a token-less charge.
-    if (props.forteConfigured && props.forteLoginId) {
-      setErr('The secure payment form is still loading — give it a second and try again.');
-      setBusy(false); return;
-    }
-    // Mock/dev path (no Forte creds): charge is simulated server-side.
-    await post(undefined);
   }
 
-  const methodLabel: Record<Method, string> = { ach: 'Bank transfer (e-Check)', card: 'Credit / Debit card', zelle: 'Zelle', cashapp: 'Cash App', venmo: 'Venmo', chime: 'Chime' };
+  const methodLabel: Record<Method, string> = { ach: 'Bank transfer (ACH)', card: 'Credit / Debit card', zelle: 'Zelle', cashapp: 'Cash App', venmo: 'Venmo', chime: 'Chime' };
 
   return (
     <form onSubmit={pay}>
@@ -127,7 +148,7 @@ export default function FinalizeForm(props: {
           <label key={m} className={`pay-opt${method === m ? ' on' : ''}`}>
             <input type="radio" name="method" checked={method === m} onChange={() => setMethod(m)} />
             <span>{methodLabel[m]}</span>
-            <em>{m === 'ach' ? 'no fee' : '+3%'}</em>
+            <em>{m === 'ach' ? 'no fee' : `+${props.cardPct}%`}</em>
           </label>
         ))}
         {MANUAL.map((m) => (
@@ -138,11 +159,13 @@ export default function FinalizeForm(props: {
         ))}
       </div>
 
-      {props.splitEligible && !isManual ? (
+      {showSplit ? (
         <div className="pay-plan">
           <label className={plan === 'full' ? 'on' : ''}><input type="radio" checked={plan === 'full'} onChange={() => setPlan('full')} /> Pay in full · {money(cur, total)}</label>
-          <label className={plan === 'split' ? 'on' : ''}><input type="radio" checked={plan === 'split'} onChange={() => setPlan('split')} /> 50% now ({money(cur, Math.round(total / 2))}), rest before check-in</label>
+          <label className={plan === 'split' ? 'on' : ''}><input type="radio" checked={plan === 'split'} onChange={() => setPlan('split')} /> 50% now ({money(cur, Math.round(total / 2))}), 50% auto-charged 14 days before check-in</label>
         </div>
+      ) : props.splitEligible && method === 'ach' ? (
+        <div className="pay-note" style={{ textAlign: 'left', marginBottom: 12 }}>The 50/50 payment plan runs on a card — choose Credit/Debit to split your payment.</div>
       ) : null}
 
       {isManual ? (
@@ -151,25 +174,20 @@ export default function FinalizeForm(props: {
         </div>
       ) : (
         <>
-          {method === 'card' ? (
-            <div className="pay-fields">
-              <div className="field"><label>Card number</label><input inputMode="numeric" value={card.number} onChange={(e) => setCard({ ...card, number: e.target.value })} placeholder="4111 1111 1111 1111" /></div>
-              <div className="two">
-                <div className="field"><label>Expiry (MM/YY)</label><input value={card.exp} onChange={(e) => setCard({ ...card, exp: e.target.value })} placeholder="09/28" /></div>
-                <div className="field"><label>CVV</label><input inputMode="numeric" value={card.cvv} onChange={(e) => setCard({ ...card, cvv: e.target.value })} placeholder="123" /></div>
-              </div>
+          {method === 'card' && useSquare ? (
+            <div className="pay-fields"><div id="sq-card" style={{ minHeight: 92 }} /></div>
+          ) : null}
+          {method === 'ach' && useSquare ? (
+            <div className="pay-manual" style={{ marginBottom: 12 }}>
+              <p>You&apos;ll securely connect your bank in a pop-up (powered by Square + Plaid). Bank payments take a few business days to clear — your dates are held the moment you submit.</p>
             </div>
-          ) : (
-            <div className="pay-fields">
-              <div className="field"><label>Routing number</label><input inputMode="numeric" value={card.routing} onChange={(e) => setCard({ ...card, routing: e.target.value })} /></div>
-              <div className="field"><label>Account number</label><input inputMode="numeric" value={card.account} onChange={(e) => setCard({ ...card, account: e.target.value })} /></div>
-            </div>
-          )}
+          ) : null}
+          {notice ? <div className="pay-note" style={{ textAlign: 'left' }}>{notice}</div> : null}
           {err ? <div className="formerr">{err}</div> : null}
           <button className="btn btn-navy" type="submit" disabled={busy} style={{ width: '100%', marginTop: 8 }}>
             {busy ? 'Processing…' : `Pay ${money(cur, showTotal)} & confirm 🔒`}
           </button>
-          {!props.forteConfigured ? <div className="pay-note">Test mode — no live payment processor connected yet. Clicking pay simulates a successful charge.</div> : null}
+          {!props.squareConfigured ? <div className="pay-note">Test mode — no live payment processor connected yet. Clicking pay simulates a successful charge.</div> : null}
         </>
       )}
     </form>

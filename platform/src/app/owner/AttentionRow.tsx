@@ -1,6 +1,6 @@
 'use client';
 import { useState, useTransition } from 'react';
-import { approveBooking, declineBooking } from './actions';
+import { approveBooking, declineBooking, sendBill } from './actions';
 import type { AttentionItem } from '@/lib/owner-data';
 
 const money = (c: string, n: number) => c + Math.round(n).toLocaleString();
@@ -44,6 +44,8 @@ export default function AttentionRow({ item, currency, isOwner }: { item: Attent
             <button className="op-btn op-btn-primary" disabled={pending} onClick={() => act(approveBooking, 'Approved')}>{pending ? '…' : 'Approve'}</button>
             <button className="op-btn op-btn-danger" disabled={pending} onClick={() => act(declineBooking, 'Declined')}>Decline</button>
           </>
+        ) : item.type === 'payment' && isOwner ? (
+          <button className="op-btn op-btn-primary" disabled={pending} onClick={() => act(sendBill, 'Bill sent')}>{pending ? '…' : 'Send bill'}</button>
         ) : item.type === 'payment' ? (
           <span className="op-role">Awaiting payment</span>
         ) : null}

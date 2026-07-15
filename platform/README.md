@@ -9,12 +9,17 @@ root (kept live until cutover).
 - **Phase 1 — Foundation:** ✅ Next.js + Prisma + Postgres, seed (Villa Siesta + 22 photos + seasonal pricing + fees), public marketing site ported (brand, carousel, copy), map.
 - **Phase 2 — Guest request:** ✅ live calendar/quote widget → `POST /api/bookings` (transactional, race-safe) → Pending tracker; owner + guest emails; live `/booking/[id]` status page.
 - **Phase 3 — Owner portal core:** ✅ Auth.js login (roles OWNER / VIEWER); Command Center (net/occupancy/YTD/next-payout metrics + Needs-attention queue + 30-night occupancy strip + upcoming arrivals) reading live from Postgres; **approve/decline** as transactional server actions (approve consumes the dates via a `CalendarBlock`-equivalent hold and emails the guest a finalize link); one-click email/call/text on each row.
-- **Phase 4 — Payments (CSG Forte):** ✅ branded `/booking/[id]/finalize` page (Forte.js client-side tokenization; card data never hits our server), `POST /api/bookings/[id]/finalize` charges via Forte REST `sale` — **pay in full**, or **50/50 split** (deposit now + stored-token balance scheduled for check-in − 14 days) when check-in is >90 days out; echeck (ACH, no fee) first, card (+3%), manual Zelle/Cash App/Venmo/Chime surfaced; `POST /api/forte/webhook` idempotently confirms `PAID`/`PARTIALLY_PAID`; both paths create the booking's `CalendarBlock` inside a transaction (final double-booking guard, self-excluded) and email a receipt.
+- **Phase 4 — Payments (Square):** ✅ branded `/booking/[id]/finalize` page on the **Web Payments SDK** (card element + Plaid-powered ACH; tokens only — card data never touches our server, SAQ-A scope). ACH offered first (no fee), card +3% applied **at charge time**; **50/50 split** (deposit now, card-on-file via `verifyBuyer`, balance auto-charged at check-in − 14 days) offered when check-in > 90 days out — persisted at approval, recomputed server-side. ACH completes async: a PENDING payment holds the dates and the **signed webhook** (`/api/square/webhook`) flips PAID/PARTIALLY_PAID (and releases dates on ACH returns). Daily `npm run sweep` cron charges due balances, retries declines with a fresh pay link until check-in − 7. Owner **Send bill** creates a Square payment link, emails it, logs `CommsLog`. Deterministic idempotency keys (`bk_{id}_full|deposit|balance`) make retries double-charge-proof.
 - **Phases 5–6** (calendar+sync, ledger/clients): next.
 
-### Payments (Forte) — mock mode
-Until the Forte env vars are set, payments run in **MOCK mode**: the finalize button simulates an approved charge (clearly logged, receipt tagged `[TEST/MOCK PAYMENT]`) so the full finalize → PAID → calendar-lock loop works before the merchant account is wired. Set these to go live (Phase-4 vars, all from Forte's Dex portal):
-`FORTE_API_ACCESS_ID`, `FORTE_API_SECURE_KEY`, `FORTE_ORGANIZATION_ID`, `FORTE_LOCATION_ID`, `FORTE_ENV` (`sandbox`|`live`), `NEXT_PUBLIC_FORTE_API_LOGIN_ID`. Point Forte's webhook at `https://villasiestasarasota.com/api/forte/webhook`.
+### Payments (Square) — mock mode & go-live
+Until `SQUARE_ACCESS_TOKEN` is set, payments run in **MOCK mode** (simulated approved charges, receipts tagged `[TEST/MOCK PAYMENT]`). To go live:
+1. Set `SQUARE_ACCESS_TOKEN`, `SQUARE_ENVIRONMENT` (`sandbox`|`production`), `SQUARE_LOCATION_ID`, `SQUARE_APPLICATION_ID`, `NEXT_PUBLIC_SQUARE_APPLICATION_ID`, `NEXT_PUBLIC_SQUARE_LOCATION_ID` (redeploy — `NEXT_PUBLIC_*` bake in at build).
+2. Developer Dashboard → **Webhooks** → subscribe `payment.updated` (+`payment.created`) at `https://villasiestasarasota.com/api/square/webhook`; put the Signature Key in `SQUARE_WEBHOOK_SIGNATURE_KEY`.
+3. Add a **Railway cron service** on this repo (Root Directory `platform`) running `npm run sweep` daily — it charges due split balances.
+4. Check `/api/square/status` — booleans show exactly which vars are missing.
+5. Sandbox test card: `4111 1111 1111 1111`, any future expiry/CVV. Test all four paths (FULL/card, FULL/ACH via webhook, SPLIT deposit, sweep with `balanceDueDate` set to yesterday). Then flip to production keys and run one real $1 charge + refund.
+Compliance notes: the +3% card surcharge is legal in FL with disclosure (shown on the page and receipt; keep it ≤ actual cost). ACH returns can arrive days later — the webhook handles a payment that un-completes.
 
 ### Owner portal
 - Lives at **`/owner`** (behind Auth.js middleware; `/owner/login` is public). The public site stays open.
@@ -22,7 +27,7 @@ Until the Forte env vars are set, payments run in **MOCK mode**: the finalize bu
 - `NEXTAUTH_SECRET` and `NEXTAUTH_URL` are required for login to work.
 
 ## Stack
-Next.js 14 (App Router, TS) · Prisma · PostgreSQL · Resend (email, optional) · Stripe (later) · Auth.js (later).
+Next.js 14 (App Router, TS) · Prisma · PostgreSQL · Resend (email, optional) · Square (payments) · Auth.js.
 
 ## Local development
 ```bash

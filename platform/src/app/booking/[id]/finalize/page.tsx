@@ -2,7 +2,7 @@ import { prisma } from '@/lib/db';
 import { loadPropertyPricing, computeQuote } from '@/lib/pricing';
 import { splitEligible } from '@/lib/finalize';
 import { toKey } from '@/lib/dates';
-import { forteConfigured } from '@/lib/forte';
+import { squareConfigured, squareEnvironment } from '@/lib/square';
 import { BookingStatus } from '@prisma/client';
 import Link from 'next/link';
 import FinalizeForm from './FinalizeForm';
@@ -25,9 +25,10 @@ export default async function FinalizePage({ params }: { params: { id: string } 
   const loaded = await loadPropertyPricing(booking.property.slug);
   const ci = toKey(booking.checkIn), co = toKey(booking.checkOut);
   const cur = booking.property.currency;
-  const achQuote = loaded ? computeQuote(loaded.pricing, { checkIn: ci, checkOut: co, guests: booking.guests, pet: booking.petFee > 0, method: 'ach' }) : null;
-  const cardQuote = loaded ? computeQuote(loaded.pricing, { checkIn: ci, checkOut: co, guests: booking.guests, pet: booking.petFee > 0, method: 'card' }) : null;
-  const eligible = splitEligible(ci);
+  const baseQuote = loaded ? computeQuote(loaded.pricing, { checkIn: ci, checkOut: co, guests: booking.guests, pet: booking.petFee > 0, method: 'ach' }) : null;
+  const cardPct = loaded?.pricing.fees.cardPercent ?? 3;
+  const baseTotal = baseQuote?.ok ? baseQuote.total : Math.round(booking.total);
+  const cardTotal = Math.round(baseTotal * (1 + cardPct / 100));
 
   return (
     <main className="wrap finalize" style={{ padding: '110px 0 80px' }}>
@@ -36,13 +37,13 @@ export default async function FinalizePage({ params }: { params: { id: string } 
         <aside className="fin-summary">
           <h3 style={{ fontFamily: 'var(--font-display)', fontSize: '1.6rem' }}>{booking.property.name}</h3>
           <div style={{ color: 'var(--muted)', marginBottom: 16 }}>{niceDate(ci)} – {niceDate(co)} · {booking.nights} nights · {booking.guests} guests</div>
-          {achQuote?.ok ? (
+          {baseQuote?.ok ? (
             <div className="quote" style={{ marginTop: 0 }}>
-              {achQuote.lines.map((l, k) => (
+              {baseQuote.lines.map((l, k) => (
                 <div className="r" key={k}><span>{l.label.replace(/^(\d)/, (m0) => cur + m0)}</span><span className="tnum">{cur}{Math.round(l.amount).toLocaleString()}</span></div>
               ))}
-              <div className="r total"><span>Total (bank / cash app)</span><b className="tnum">{cur}{achQuote.total.toLocaleString()}</b></div>
-              <div className="r hint">Paying by card adds {loaded?.pricing.fees.cardPercent}% ({cur}{cardQuote ? cardQuote.total.toLocaleString() : ''} total).</div>
+              <div className="r total"><span>Total (bank / cash app)</span><b className="tnum">{cur}{baseTotal.toLocaleString()}</b></div>
+              <div className="r hint">Paying by card adds {cardPct}% ({cur}{cardTotal.toLocaleString()} total) — disclosed here and on your receipt.</div>
             </div>
           ) : null}
         </aside>
@@ -51,12 +52,15 @@ export default async function FinalizePage({ params }: { params: { id: string } 
           <FinalizeForm
             bookingId={booking.id}
             currency={cur}
-            achTotal={achQuote?.total || 0}
-            cardTotal={cardQuote?.total || 0}
-            splitEligible={eligible}
-            forteConfigured={forteConfigured()}
-            forteLoginId={process.env.NEXT_PUBLIC_FORTE_API_LOGIN_ID || ''}
-            forteEnv={process.env.FORTE_ENV || 'sandbox'}
+            baseTotal={baseTotal}
+            cardTotal={cardTotal}
+            cardPct={cardPct}
+            splitEligible={splitEligible(ci)}
+            guestName={`${booking.client.firstName} ${booking.client.lastName}`.trim()}
+            squareConfigured={squareConfigured()}
+            squareEnv={squareEnvironment()}
+            appId={process.env.NEXT_PUBLIC_SQUARE_APPLICATION_ID || ''}
+            locationId={process.env.NEXT_PUBLIC_SQUARE_LOCATION_ID || ''}
           />
         </section>
       </div>
