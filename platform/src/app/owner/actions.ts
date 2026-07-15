@@ -8,9 +8,11 @@ import { addDays, parseKey, toKey } from '@/lib/dates';
 import { sendEmail, sendTemplate, notifyEmails } from '@/lib/email';
 import { approvedFinalize, declined } from '@/lib/emails';
 import { toEmailBooking } from '@/lib/email-data';
+import { buildArrivalEmail, arrivalReady } from '@/lib/arrival';
 import { logComms } from '@/lib/comms';
 import { splitEligible } from '@/lib/finalize';
 import { createPaymentLink, toCents } from '@/lib/square';
+import { DEFAULT_SLUG } from '@/lib/property';
 import { BookingStatus, CommsType } from '@prisma/client';
 
 const HOLD_HOURS = 48;
@@ -107,6 +109,80 @@ export async function declineBooking(bookingId: string): Promise<ActionResult> {
     await sendTemplate(b.client.email, declined(toEmailBooking(b, b.client)), notifyEmails()[0]);
     await logComms(b.clientId, CommsType.EMAIL, 'declined');
     revalidatePath('/owner');
+    revalidatePath('/owner/bookings');
+    return { ok: true };
+  } catch (e) {
+    return { ok: false, error: (e as Error).message };
+  }
+}
+
+/** Owner-initiated cancellation of an approved/paid booking: releases the dates. */
+export async function cancelBooking(bookingId: string): Promise<ActionResult> {
+  try {
+    await requireOwner();
+    await prisma.$transaction(async (tx) => {
+      const b = await tx.booking.findUnique({ where: { id: bookingId } });
+      if (!b) throw new Error('not_found');
+      if (b.status === BookingStatus.CANCELLED || b.status === BookingStatus.EXPIRED) return;
+      await tx.booking.update({ where: { id: bookingId }, data: { status: BookingStatus.CANCELLED, holdExpiresAt: null } });
+      // Release the held dates so the calendar reopens.
+      await tx.calendarBlock.deleteMany({ where: { bookingId } });
+    });
+    await logComms((await prisma.booking.findUnique({ where: { id: bookingId }, select: { clientId: true } }))!.clientId, CommsType.EMAIL, 'cancelled-by-owner');
+    revalidatePath('/owner');
+    revalidatePath('/owner/bookings');
+    revalidatePath(`/owner/bookings/${bookingId}`);
+    return { ok: true };
+  } catch (e) {
+    return { ok: false, error: (e as Error).message };
+  }
+}
+
+/** One-click pre-arrival email (door code, Wi-Fi, directions, rules). */
+export async function sendArrivalEmail(bookingId: string): Promise<ActionResult> {
+  try {
+    await requireOwner();
+    const b = await prisma.booking.findUnique({ where: { id: bookingId }, include: { client: true, property: true } });
+    if (!b) return { ok: false, error: 'not_found' };
+    if (b.status !== BookingStatus.PAID && b.status !== BookingStatus.PARTIALLY_PAID)
+      return { ok: false, error: 'Arrival info is only for confirmed (paid) stays.' };
+    if (!arrivalReady(b.property))
+      return { ok: false, error: 'Add the address, door code and Wi-Fi under Settings → Arrival info first.' };
+
+    await sendTemplate(b.client.email, buildArrivalEmail(b, b.client, b.property), notifyEmails()[0]);
+    await prisma.booking.update({ where: { id: bookingId }, data: { arrivalSent: true } });
+    await logComms(b.clientId, CommsType.EMAIL, 'arrival-info');
+    revalidatePath(`/owner/bookings/${bookingId}`);
+    return { ok: true };
+  } catch (e) {
+    return { ok: false, error: (e as Error).message };
+  }
+}
+
+export type ArrivalInfoInput = {
+  address: string; doorCode: string; wifiName: string; wifiPassword: string;
+  parkingNotes: string; arrivalNotes: string; houseRules: string; autoArrival: boolean;
+};
+
+/** Save the property's arrival info (Settings editor). houseRules is newline-separated. */
+export async function saveArrivalInfo(input: ArrivalInfoInput): Promise<ActionResult> {
+  try {
+    await requireOwner();
+    const rules = input.houseRules.split('\n').map((r) => r.trim()).filter(Boolean);
+    await prisma.property.update({
+      where: { slug: DEFAULT_SLUG },
+      data: {
+        address: input.address.trim() || null,
+        doorCode: input.doorCode.trim() || null,
+        wifiName: input.wifiName.trim() || null,
+        wifiPassword: input.wifiPassword.trim() || null,
+        parkingNotes: input.parkingNotes.trim() || null,
+        arrivalNotes: input.arrivalNotes.trim() || null,
+        houseRules: rules,
+        autoArrival: input.autoArrival,
+      },
+    });
+    revalidatePath('/owner/settings');
     return { ok: true };
   } catch (e) {
     return { ok: false, error: (e as Error).message };

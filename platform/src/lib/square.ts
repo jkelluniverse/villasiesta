@@ -118,6 +118,40 @@ export async function createPaymentLink(input: { name: string; amountCents: bigi
   }
 }
 
+export type PaymentDetails = {
+  ok: boolean; mock: boolean;
+  id?: string; status?: string;
+  amount?: number;          // dollars actually charged
+  processingFee?: number;   // dollars Square kept
+  cardBrand?: string; last4?: string;
+  createdAt?: string; receiptUrl?: string;
+  error?: string;
+};
+
+/** Live payment record for the owner money panel: amount, Square processing fee, card. */
+export async function getPaymentDetails(paymentId: string): Promise<PaymentDetails> {
+  if (!squareConfigured() || paymentId.startsWith('mock_')) {
+    return { ok: true, mock: true, id: paymentId, status: 'COMPLETED' };
+  }
+  try {
+    const res = await square().payments.get({ paymentId });
+    const p = res.payment;
+    if (!p?.id) return { ok: false, mock: false, error: 'not_found' };
+    const centsToDollars = (c?: bigint | number | null) => (c == null ? undefined : Number(c) / 100);
+    const fee = (p.processingFee ?? []).reduce((s, f) => s + Number(f.amountMoney?.amount ?? 0), 0);
+    const card = p.cardDetails?.card;
+    return {
+      ok: true, mock: false, id: p.id, status: p.status ?? undefined,
+      amount: centsToDollars(p.amountMoney?.amount),
+      processingFee: fee ? fee / 100 : undefined,
+      cardBrand: card?.cardBrand ?? undefined, last4: card?.last4 ?? undefined,
+      createdAt: p.createdAt ?? undefined, receiptUrl: p.receiptUrl ?? undefined,
+    };
+  } catch (e) {
+    return { ok: false, mock: false, error: squareErrorMessage(e) };
+  }
+}
+
 export function squareErrorMessage(e: unknown): string {
   const errors = (e as { errors?: { code?: string; detail?: string; category?: string }[] })?.errors;
   if (Array.isArray(errors) && errors.length) {

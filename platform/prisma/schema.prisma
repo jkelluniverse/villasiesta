@@ -44,6 +44,15 @@ model Property {
   bookingMode    String   @default("request") // request | instant
   airbnbIcalUrl  String?
   currency       String   @default("$")
+  // Arrival info (one-click / auto-sent pre-arrival email)
+  address        String?
+  doorCode       String?
+  wifiName       String?
+  wifiPassword   String?
+  parkingNotes   String?
+  arrivalNotes   String?
+  houseRules     String[]
+  autoArrival    Boolean  @default(true)   // auto-send arrival email 3 days before check-in
   createdAt      DateTime @default(now())
 
   photos       Photo[]
@@ -164,6 +173,7 @@ model Booking {
   balanceAmount  Float?         // SPLIT: 50% charged later
   balanceDueDate DateTime?      // check-in − 14 days
   balancePaid    Boolean        @default(false)
+  arrivalSent    Boolean        @default(false)   // arrival email sent (one-click or auto)
   // Square references
   squarePaymentId   String?   // payment id of the deposit/full payment
   squareCustomerId  String?   // Customers API id

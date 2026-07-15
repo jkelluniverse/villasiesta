@@ -1,10 +1,11 @@
 import { getServerSession } from 'next-auth';
 import { redirect } from 'next/navigation';
+import Link from 'next/link';
 import { authOptions } from '@/lib/auth';
 import { getDashboard } from '@/lib/owner-data';
 import { DEFAULT_SLUG } from '@/lib/property';
 import AttentionRow from './AttentionRow';
-import SignOutButton from './SignOutButton';
+import OwnerBar from './OwnerBar';
 
 export const dynamic = 'force-dynamic';
 
@@ -24,14 +25,7 @@ export default async function OwnerDashboard() {
 
   return (
     <>
-      <div className="op-bar">
-        <div className="brand"><span className="vsq">VS</span> Villa Siesta · Owners</div>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 14 }}>
-          <span className="muted">{dash.month}</span>
-          {!isOwner ? <span className="op-role">Read-only</span> : null}
-          <SignOutButton />
-        </div>
-      </div>
+      <OwnerBar active="dashboard" right={<><span className="muted">{dash.month}</span>{!isOwner ? <span className="op-role">Read-only</span> : null}</>} />
 
       <div className="op-wrap">
         <h1>Good day, {dash.ownerName}</h1>
@@ -85,10 +79,10 @@ export default async function OwnerDashboard() {
             <div className="op-label">Upcoming arrivals</div>
             <div style={{ marginTop: 10 }}>
               {dash.arrivals.length ? dash.arrivals.map((a) => (
-                <div className="op-arr" key={a.bookingId}>
+                <Link className="op-arr" key={a.bookingId} href={`/owner/bookings/${a.bookingId}`} style={{ textDecoration: 'none', color: 'inherit' }}>
                   <span className="who">{a.name || a.email}</span>
                   <span className="when num">{niceDay(a.checkIn)} · {a.nights} nt</span>
-                </div>
+                </Link>
               )) : <div className="op-note">No upcoming arrivals yet.</div>}
             </div>
           </div>

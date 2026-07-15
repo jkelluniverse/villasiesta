@@ -1,5 +1,6 @@
 'use client';
 import { useState, useTransition } from 'react';
+import Link from 'next/link';
 import { approveBooking, declineBooking, sendBill } from './actions';
 import type { AttentionItem } from '@/lib/owner-data';
 
@@ -34,6 +35,7 @@ export default function AttentionRow({ item, currency, isOwner }: { item: Attent
         {err ? <div className="meta" style={{ color: 'var(--garnet)' }}>{err}</div> : null}
       </div>
       <div className="acts">
+        <Link className="op-iconbtn" href={`/owner/bookings/${item.bookingId}`} title="View booking">→</Link>
         <a className="op-iconbtn" href={`mailto:${item.email}`} title="Email guest">✉</a>
         {item.phone ? <a className="op-iconbtn" href={telHref(item.phone)} title="Call guest">☎</a> : null}
         {item.phone ? <a className="op-iconbtn" href={smsHref(item.phone)} title="Text guest">💬</a> : null}
