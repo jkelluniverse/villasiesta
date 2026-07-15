@@ -3,7 +3,11 @@ import { WebhooksHelper } from 'square';
 import { prisma } from '@/lib/db';
 import { BookingStatus, BlockSource } from '@prisma/client';
 import { parseKey, toKey } from '@/lib/dates';
-import { sendEmail, notifyEmails } from '@/lib/email';
+import { sendEmail, sendTemplate, notifyEmails } from '@/lib/email';
+import { depositReceipt, paidConfirmation, ownerPaymentAlert } from '@/lib/emails';
+import { toEmailBooking } from '@/lib/email-data';
+import { logComms } from '@/lib/comms';
+import { CommsType } from '@prisma/client';
 
 export const dynamic = 'force-dynamic';
 
@@ -42,14 +46,16 @@ export async function POST(req: NextRequest) {
   console.log(`[square:webhook] ${evt.type} payment=${payment.id} status=${status} ref=${ref} booking=${booking.id}`);
 
   if (status === 'COMPLETED') {
+    const target = kind === 'balance' ? BookingStatus.PAID
+      : booking.paymentPlan === 'SPLIT' && kind === 'deposit' ? BookingStatus.PARTIALLY_PAID : BookingStatus.PAID;
+    // A real transition happened here (vs. a webhook echoing a synchronous update)?
+    const transitioned = kind === 'balance' ? !booking.balancePaid : (booking.status !== BookingStatus.PAID && booking.status !== target);
+
     await prisma.$transaction(async (tx) => {
       if (kind === 'balance') {
         if (!booking.balancePaid) await tx.booking.update({ where: { id: booking.id }, data: { balancePaid: true, status: BookingStatus.PAID } });
-      } else {
-        const target = booking.paymentPlan === 'SPLIT' && kind === 'deposit' ? BookingStatus.PARTIALLY_PAID : BookingStatus.PAID;
-        if (booking.status !== BookingStatus.PAID && booking.status !== target) {
-          await tx.booking.update({ where: { id: booking.id }, data: { status: target, balancePaid: target === BookingStatus.PAID, holdExpiresAt: null } });
-        }
+      } else if (transitioned) {
+        await tx.booking.update({ where: { id: booking.id }, data: { status: target, balancePaid: target === BookingStatus.PAID, holdExpiresAt: null } });
       }
       if (!booking.block) {
         await tx.calendarBlock.create({
@@ -57,6 +63,23 @@ export async function POST(req: NextRequest) {
         });
       }
     });
+
+    // Email only when this webhook is what confirmed the payment (async ACH clearing).
+    if (transitioned) {
+      const eb = toEmailBooking(booking, booking.client);
+      const owners = notifyEmails();
+      if (kind === 'balance') {
+        if (owners.length) await sendTemplate(owners, ownerPaymentAlert({ ...eb, lastName: booking.client.lastName }, 'balance'), booking.client.email);
+      } else if (target === BookingStatus.PARTIALLY_PAID) {
+        await sendTemplate(booking.client.email, depositReceipt(eb), owners[0]);
+        await logComms(booking.clientId, CommsType.EMAIL, 'deposit-receipt');
+        if (owners.length) await sendTemplate(owners, ownerPaymentAlert({ ...eb, lastName: booking.client.lastName }, 'deposit'), booking.client.email);
+      } else {
+        await sendTemplate(booking.client.email, paidConfirmation(eb), owners[0]);
+        await logComms(booking.clientId, CommsType.EMAIL, 'paid-confirmation');
+        if (owners.length) await sendTemplate(owners, ownerPaymentAlert({ ...eb, lastName: booking.client.lastName }, 'full'), booking.client.email);
+      }
+    }
   } else if ((status === 'FAILED' || status === 'CANCELED') && kind !== 'balance') {
     // An ACH deposit/full payment failed or was returned: release the dates.
     await prisma.$transaction(async (tx) => {

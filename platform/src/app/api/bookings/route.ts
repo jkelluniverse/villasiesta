@@ -4,7 +4,8 @@ import { prisma } from '@/lib/db';
 import { computeQuote, loadPropertyPricing } from '@/lib/pricing';
 import { assertRangeAvailable } from '@/lib/availability';
 import { parseKey } from '@/lib/dates';
-import { sendEmail, notifyEmails } from '@/lib/email';
+import { sendTemplate, notifyEmails } from '@/lib/email';
+import { requestReceived, ownerNewRequest } from '@/lib/emails';
 import { DEFAULT_SLUG } from '@/lib/property';
 
 export const dynamic = 'force-dynamic';
@@ -70,7 +71,7 @@ export async function POST(req: NextRequest) {
     });
 
     // Fire notifications after the row is safely committed.
-    await sendBookingEmails(input, quote.total, quote.currency, booking.id);
+    await sendBookingEmails(input, quote, booking);
 
     return NextResponse.json({ ok: true, bookingId: booking.id });
   } catch (e) {
@@ -83,40 +84,16 @@ export async function POST(req: NextRequest) {
 }
 
 async function sendBookingEmails(
-  input: z.infer<typeof BookingInput>, total: number, currency: string, bookingId: string,
+  input: z.infer<typeof BookingInput>,
+  quote: { total: number; nights: number },
+  booking: { id: string; checkIn: Date; checkOut: Date; guests: number },
 ) {
-  const appUrl = process.env.APP_URL || '';
-  const dates = `${input.checkIn} → ${input.checkOut}`;
   const owners = notifyEmails();
-
-  if (owners.length) {
-    await sendEmail({
-      to: owners,
-      replyTo: input.email,
-      subject: `New booking request — ${input.firstName} ${input.lastName} — ${dates}`,
-      text: [
-        'New booking request for Villa Siesta',
-        '', `Guest:  ${input.firstName} ${input.lastName}`, `Email:  ${input.email}`,
-        `Phone:  ${input.phone || '—'}`, `Guests: ${input.guests}${input.pet ? ' (+ pet)' : ''}`,
-        `Dates:  ${dates}`, `Est. total: ${currency}${total.toLocaleString()}`,
-        input.message ? `\nMessage: ${input.message}` : '',
-        '', `Review it: ${appUrl}/owner`,
-      ].join('\n'),
-    });
-  }
-
-  await sendEmail({
-    to: input.email,
-    replyTo: owners[0],
-    subject: 'We received your request — Villa Siesta',
-    text: [
-      `Hi ${input.firstName},`, '',
-      `Thanks for your request to book Villa Siesta for ${dates}.`,
-      `Estimated total: ${currency}${total.toLocaleString()}. Nothing has been charged.`, '',
-      'The owner will review within 24–48 hours and email you a secure link to',
-      'finalize and pay if your reservation is approved.', '',
-      appUrl ? `Track your request: ${appUrl}/booking/${bookingId}` : '',
-      '', '— Villa Siesta',
-    ].join('\n'),
-  });
+  const b = {
+    id: booking.id, firstName: input.firstName, lastName: input.lastName, email: input.email,
+    phone: input.phone || undefined, message: input.message || undefined,
+    checkIn: booking.checkIn, checkOut: booking.checkOut, nights: quote.nights, guests: booking.guests, total: quote.total,
+  };
+  if (owners.length) await sendTemplate(owners, ownerNewRequest(b), input.email);
+  await sendTemplate(input.email, requestReceived(b), owners[0]);
 }

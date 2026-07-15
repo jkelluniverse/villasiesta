@@ -4,7 +4,10 @@ import { loadPropertyPricing, computeQuote } from './pricing';
 import { assertRangeAvailable } from './availability';
 import { addDays, nightsBetween, parseKey, toKey, todayKey } from './dates';
 import { createSquarePayment, createSquareCustomer, createCardOnFile, toCents } from './square';
-import { sendEmail, notifyEmails } from './email';
+import { sendEmail, sendTemplate, notifyEmails } from './email';
+import { depositReceipt, paidConfirmation, ownerPaymentAlert } from './emails';
+import { logComms } from './comms';
+import { CommsType } from '@prisma/client';
 
 const SPLIT_MIN_DAYS_OUT = 90;   // 50/50 split only when check-in is > 90 days away
 const BALANCE_LEAD_DAYS = 14;    // balance auto-charged at check-in − 14 days
@@ -137,31 +140,32 @@ export async function finalizeBooking(input: FinalizeInput): Promise<FinalizeRes
     return { ok: false, error: 'server_error' };
   }
 
-  await sendReceipt(booking.client.email, booking.property.currency, {
-    name: booking.client.firstName, dates: `${ci} → ${co}`, nights: booking.nights,
-    charged: chargeNow, split: useSplit, balance: balanceBase, balanceDue: balanceDueDate,
-    achPending, mock: !!payment.mock,
-  });
+  const eb = {
+    id: booking.id, firstName: booking.client.firstName, lastName: booking.client.lastName,
+    checkIn: booking.checkIn, checkOut: booking.checkOut, nights: booking.nights, guests: booking.guests,
+    total: money2(baseTotal + cardFeeNow),
+    depositAmount: useSplit ? depositBase : null, balanceAmount: useSplit ? balanceBase : null,
+    balanceDueDate: balanceDueDate ? parseKey(balanceDueDate) : null,
+  };
+  const owners = notifyEmails();
+
+  if (achPending) {
+    // No template for "processing" — a short branded-adjacent note; confirmation
+    // follows from the webhook when Square completes the ACH.
+    await sendEmail({
+      to: booking.client.email, replyTo: owners[0],
+      subject: 'Payment processing — Villa Siesta',
+      text: `Hi ${booking.client.firstName},\n\nYour bank payment is processing (transfers take a few business days). Your dates ${ci} → ${co} are held — we'll confirm the moment it clears.\n\n— Villa Siesta`,
+    });
+  } else if (useSplit) {
+    await sendTemplate(booking.client.email, depositReceipt(eb), owners[0]);
+    await logComms(booking.clientId, CommsType.EMAIL, 'deposit-receipt');
+    if (owners.length) await sendTemplate(owners, ownerPaymentAlert(eb, 'deposit'), booking.client.email);
+  } else {
+    await sendTemplate(booking.client.email, paidConfirmation(eb), owners[0]);
+    await logComms(booking.clientId, CommsType.EMAIL, 'paid-confirmation');
+    if (owners.length) await sendTemplate(owners, ownerPaymentAlert(eb, 'full'), booking.client.email);
+  }
 
   return { ok: true, status: newStatus, pendingAch: achPending, mock: payment.mock };
-}
-
-async function sendReceipt(email: string, cur: string, r: {
-  name: string; dates: string; nights: number; charged: number;
-  split: boolean; balance: number; balanceDue: string | null; achPending: boolean; mock: boolean;
-}) {
-  const fmt = (n: number) => cur + n.toLocaleString(undefined, { maximumFractionDigits: 2 });
-  const lines = [
-    `Hi ${r.name},`, '',
-    r.achPending
-      ? `Your bank payment of ${fmt(r.charged)} is processing (bank transfers take a few business days). Your dates are held — we'll confirm the moment it clears.`
-      : `You're confirmed at Villa Siesta — thank you!`,
-    `${r.dates} · ${r.nights} nights`, '',
-    r.split
-      ? `Deposit: ${fmt(r.charged)} (50%). The remaining ${fmt(r.balance)} will be charged automatically to your card on ${r.balanceDue}.`
-      : r.achPending ? '' : `Paid in full: ${fmt(r.charged)}.`,
-    '', r.achPending ? '' : 'Your exact address and check-in details are on their way.', '', '— Villa Siesta',
-  ];
-  if (r.mock) lines.unshift('[TEST/MOCK PAYMENT — Square not yet configured]', '');
-  await sendEmail({ to: email, replyTo: notifyEmails()[0], subject: r.achPending ? 'Payment processing — Villa Siesta' : 'Your reservation is confirmed — Villa Siesta', text: lines.filter((l) => l !== '').join('\n') });
 }

@@ -4,9 +4,12 @@
 // and retries daily until check-in − 7 days, then flags for manual follow-up
 // (the booking stays PARTIALLY_PAID, which keeps it in the attention queue).
 
-import { PrismaClient, BookingStatus } from '@prisma/client';
+import { PrismaClient, BookingStatus, CommsType } from '@prisma/client';
 import { createSquarePayment, createPaymentLink, toCents } from '../src/lib/square';
-import { sendEmail, notifyEmails } from '../src/lib/email';
+import { sendEmail, sendTemplate, notifyEmails } from '../src/lib/email';
+import { paidConfirmation, ownerPaymentAlert } from '../src/lib/emails';
+import { toEmailBooking } from '../src/lib/email-data';
+import { logComms } from '../src/lib/comms';
 import { addDays, toKey, todayKey } from '../src/lib/dates';
 
 const prisma = new PrismaClient();
@@ -51,11 +54,11 @@ async function main() {
         where: { id: b.id },
         data: { balancePaid: true, status: BookingStatus.PAID, cardFee: money2((b.cardFee || 0) + (charge - balance)), total: money2((b.total || 0) + (charge - balance)) },
       });
-      await sendEmail({
-        to: b.client.email, replyTo: notifyEmails()[0],
-        subject: 'Balance received — Villa Siesta',
-        text: `Hi ${b.client.firstName},\n\nYour remaining balance of ${b.property.currency}${charge.toLocaleString()} was charged to your card on file. Your stay ${ci} → ${toKey(b.checkOut)} is fully paid — see you soon!\n\n— Villa Siesta`,
-      });
+      const eb = toEmailBooking(b, b.client);
+      const owners = notifyEmails();
+      await sendTemplate(b.client.email, paidConfirmation(eb), owners[0]);
+      await logComms(b.clientId, CommsType.EMAIL, 'balance-paid-confirmation');
+      if (owners.length) await sendTemplate(owners, ownerPaymentAlert({ ...eb, lastName: b.client.lastName }, 'balance'), b.client.email);
       console.log(`[sweep] ${b.id}: balance charged (${charge})`);
     } else {
       console.error(`[sweep] ${b.id}: balance charge failed — ${res.error}`);

@@ -5,7 +5,10 @@ import { authOptions } from '@/lib/auth';
 import { prisma } from '@/lib/db';
 import { assertRangeAvailable } from '@/lib/availability';
 import { addDays, parseKey, toKey } from '@/lib/dates';
-import { sendEmail, notifyEmails } from '@/lib/email';
+import { sendEmail, sendTemplate, notifyEmails } from '@/lib/email';
+import { approvedFinalize, declined } from '@/lib/emails';
+import { toEmailBooking } from '@/lib/email-data';
+import { logComms } from '@/lib/comms';
 import { splitEligible } from '@/lib/finalize';
 import { createPaymentLink, toCents } from '@/lib/square';
 import { BookingStatus, CommsType } from '@prisma/client';
@@ -48,20 +51,8 @@ export async function approveBooking(bookingId: string): Promise<ActionResult> {
       });
     });
 
-    const appUrl = process.env.APP_URL || '';
-    await sendEmail({
-      to: booking.client.email,
-      replyTo: notifyEmails()[0],
-      subject: `Approved — finalize your stay at ${booking.property.name}`,
-      text: [
-        `Hi ${booking.client.firstName},`, '',
-        `Good news — your dates at ${booking.property.name} are approved!`,
-        `${toKey(booking.checkIn)} → ${toKey(booking.checkOut)} · ${booking.nights} nights`,
-        `Total: ${booking.property.currency}${Math.round(booking.total).toLocaleString()}`, '',
-        `Finalize and pay to secure your reservation${appUrl ? `:\n${appUrl}/booking/${booking.id}/finalize` : '.'}`,
-        `Pay by bank transfer (no fee) or card (+3%). Your dates are held for ${HOLD_HOURS} hours.`, '', '— Villa Siesta',
-      ].join('\n'),
-    });
+    await sendTemplate(booking.client.email, approvedFinalize(toEmailBooking(booking, booking.client)), notifyEmails()[0]);
+    await logComms(booking.clientId, CommsType.EMAIL, 'approved-finalize');
 
     revalidatePath('/owner');
     return { ok: true };
@@ -113,17 +104,8 @@ export async function declineBooking(bookingId: string): Promise<ActionResult> {
       data: { status: BookingStatus.CANCELLED },
       include: { client: true, property: true },
     });
-    await sendEmail({
-      to: b.client.email,
-      replyTo: notifyEmails()[0],
-      subject: `About your request — ${b.property.name}`,
-      text: [
-        `Hi ${b.client.firstName},`, '',
-        `Thank you for your interest in ${b.property.name}. Unfortunately we can't confirm`,
-        `${toKey(b.checkIn)} → ${toKey(b.checkOut)} at this time.`, '',
-        `If your dates are flexible, reply and we'll help you find an open week.`, '', '— Villa Siesta',
-      ].join('\n'),
-    });
+    await sendTemplate(b.client.email, declined(toEmailBooking(b, b.client)), notifyEmails()[0]);
+    await logComms(b.clientId, CommsType.EMAIL, 'declined');
     revalidatePath('/owner');
     return { ok: true };
   } catch (e) {
