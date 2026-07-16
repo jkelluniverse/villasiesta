@@ -6,6 +6,7 @@ import { getDashboard } from '@/lib/owner-data';
 import { DEFAULT_SLUG } from '@/lib/property';
 import AttentionRow from './AttentionRow';
 import OwnerBar from './OwnerBar';
+import StatusPill from './StatusPill';
 
 export const dynamic = 'force-dynamic';
 
@@ -79,9 +80,15 @@ export default async function OwnerDashboard() {
             <div className="op-label">Upcoming arrivals</div>
             <div style={{ marginTop: 10 }}>
               {dash.arrivals.length ? dash.arrivals.map((a) => (
-                <Link className="op-arr" key={a.bookingId} href={`/owner/bookings/${a.bookingId}`} style={{ textDecoration: 'none', color: 'inherit' }}>
-                  <span className="who">{a.name || a.email}</span>
-                  <span className="when num">{niceDay(a.checkIn)} · {a.nights} nt</span>
+                <Link className="op-arr op-arr-link" key={a.bookingId} href={`/owner/bookings/${a.bookingId}`} style={{ textDecoration: 'none', color: 'inherit' }}>
+                  <span style={{ display: 'flex', alignItems: 'center', gap: 10, minWidth: 0 }}>
+                    <span className="who">{a.name || a.email}</span>
+                    <StatusPill status={a.status} />
+                  </span>
+                  <span style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+                    <span className="when num">{niceDay(a.checkIn)} · {a.nights} nt</span>
+                    <span className="op-view arr-view"><span className="full">View booking</span><span className="short">View</span></span>
+                  </span>
                 </Link>
               )) : <div className="op-note">No upcoming arrivals yet.</div>}
             </div>

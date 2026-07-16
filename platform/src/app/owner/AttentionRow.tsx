@@ -2,6 +2,7 @@
 import { useState, useTransition } from 'react';
 import Link from 'next/link';
 import { approveBooking, declineBooking, sendBill } from './actions';
+import StatusPill from './StatusPill';
 import type { AttentionItem } from '@/lib/owner-data';
 
 const money = (c: string, n: number) => c + Math.round(n).toLocaleString();
@@ -23,22 +24,25 @@ export default function AttentionRow({ item, currency, isOwner }: { item: Attent
 
   const title =
     item.type === 'request' ? `Request · ${item.name}` :
-    item.type === 'payment' ? `Payment due · ${item.name}` :
+    item.type === 'payment' ? `Awaiting payment · ${item.name}` :
+    item.type === 'balance_failed' ? `Balance failed · ${item.name}` :
     `Conflict · ${item.name}`;
 
   return (
     <div className="op-row">
-      <span className={`op-dot dot-${item.type}`} />
+      <span className={`op-dot dot-${item.type === 'balance_failed' ? 'conflict' : item.type}`} />
       <div className="main">
-        <div className="title">{title}</div>
+        <div className="title" style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
+          {title}<StatusPill status={item.status} />
+        </div>
         <div className="meta num">{item.dates} · {item.nights} nt · {item.guests} guests · {money(currency, item.total)}{item.message ? ` · “${item.message}”` : ''}</div>
         {err ? <div className="meta" style={{ color: 'var(--garnet)' }}>{err}</div> : null}
       </div>
       <div className="acts">
-        <Link className="op-iconbtn" href={`/owner/bookings/${item.bookingId}`} title="View booking">→</Link>
-        <a className="op-iconbtn" href={`mailto:${item.email}`} title="Email guest">✉</a>
-        {item.phone ? <a className="op-iconbtn" href={telHref(item.phone)} title="Call guest">☎</a> : null}
-        {item.phone ? <a className="op-iconbtn" href={smsHref(item.phone)} title="Text guest">💬</a> : null}
+        <Link className="op-view" href={`/owner/bookings/${item.bookingId}`}><span className="full">View booking</span><span className="short">View</span></Link>
+        <a className="op-iconbtn" href={`mailto:${item.email}`} title="Email guest" aria-label="Email guest">✉</a>
+        {item.phone ? <a className="op-iconbtn" href={telHref(item.phone)} title="Call guest" aria-label="Call guest">☎</a> : null}
+        {item.phone ? <a className="op-iconbtn" href={smsHref(item.phone)} title="Text guest" aria-label="Text guest">💬</a> : null}
         {done ? (
           <span className="op-role">{done}</span>
         ) : item.type === 'request' && isOwner ? (
@@ -46,9 +50,9 @@ export default function AttentionRow({ item, currency, isOwner }: { item: Attent
             <button className="op-btn op-btn-primary" disabled={pending} onClick={() => act(approveBooking, 'Approved')}>{pending ? '…' : 'Approve'}</button>
             <button className="op-btn op-btn-danger" disabled={pending} onClick={() => act(declineBooking, 'Declined')}>Decline</button>
           </>
-        ) : item.type === 'payment' && isOwner ? (
-          <button className="op-btn op-btn-primary" disabled={pending} onClick={() => act(sendBill, 'Bill sent')}>{pending ? '…' : 'Send bill'}</button>
-        ) : item.type === 'payment' ? (
+        ) : (item.type === 'payment' || item.type === 'balance_failed') && isOwner ? (
+          <button className="op-btn op-btn-primary" disabled={pending} onClick={() => act(sendBill, 'Link sent')}>{pending ? '…' : item.type === 'balance_failed' ? 'Retry — send link' : 'Send payment link'}</button>
+        ) : (item.type === 'payment' || item.type === 'balance_failed') ? (
           <span className="op-role">Awaiting payment</span>
         ) : null}
       </div>

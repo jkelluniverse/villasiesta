@@ -1,7 +1,7 @@
 'use client';
 import { useState, useTransition } from 'react';
 import { useRouter } from 'next/navigation';
-import { approveBooking, declineBooking, cancelBooking, sendBill, sendArrivalEmail } from '../actions';
+import { approveBooking, declineBooking, cancelBooking, sendBill, sendArrivalEmail, markPaid } from '../actions';
 import type { ActionResult } from '../actions';
 
 type Fn = (id: string) => Promise<ActionResult>;
@@ -31,10 +31,12 @@ export default function BookingActions({ id, status, isOwner }: { id: string; st
     buttons.push({ label: 'Decline', fn: declineBooking, kind: 'danger', confirm: 'Decline this request? The guest is emailed.', done: 'Declined.' });
   } else if (status === 'APPROVED') {
     buttons.push({ label: 'Send payment link', fn: sendBill, kind: 'primary', done: 'Payment link sent.' });
+    buttons.push({ label: 'Mark as paid', fn: markPaid, kind: 'ghost', confirm: 'Mark this booking fully paid? Use only if payment was collected outside the site or a link already cleared.', done: 'Marked paid.' });
     buttons.push({ label: 'Cancel', fn: cancelBooking, kind: 'danger', confirm: 'Cancel this booking and release the dates?', done: 'Cancelled — dates released.' });
   } else if (status === 'PARTIALLY_PAID') {
     buttons.push({ label: 'Send arrival email', fn: sendArrivalEmail, kind: 'primary', done: 'Arrival details sent.' });
     buttons.push({ label: 'Send payment link', fn: sendBill, kind: 'ghost', done: 'Payment link sent.' });
+    buttons.push({ label: 'Mark as paid', fn: markPaid, kind: 'ghost', confirm: 'Mark the balance fully paid? Use only if the balance was collected outside the site.', done: 'Marked paid.' });
     buttons.push({ label: 'Cancel', fn: cancelBooking, kind: 'danger', confirm: 'Cancel this booking and release the dates?', done: 'Cancelled — dates released.' });
   } else if (status === 'PAID') {
     buttons.push({ label: 'Send arrival email', fn: sendArrivalEmail, kind: 'primary', done: 'Arrival details sent.' });

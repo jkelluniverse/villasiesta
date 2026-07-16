@@ -5,6 +5,7 @@ import { authOptions } from '@/lib/auth';
 import { DEFAULT_SLUG } from '@/lib/property';
 import { listBookings, filterBookings, type BookingTab, type BookingRow } from '@/lib/owner-bookings';
 import OwnerBar from '../OwnerBar';
+import StatusPill from '../StatusPill';
 
 export const dynamic = 'force-dynamic';
 
@@ -62,11 +63,10 @@ export default async function BookingsPage({ searchParams }: { searchParams: { t
 }
 
 function Row({ r }: { r: BookingRow }) {
-  const pillCls = r.status.toLowerCase();
   const progress =
-    r.status === 'PAID' ? 'Paid in full' :
+    r.status === 'PAID' ? `${money(r.total)} of ${money(r.total)} ✓` :
     r.status === 'PARTIALLY_PAID' ? `${money(r.paidAmount)} of ${money(r.total)}` :
-    r.status === 'APPROVED' ? 'Awaiting payment' :
+    r.status === 'APPROVED' ? `${money(0)} of ${money(r.total)}` :
     r.status === 'REQUESTED' ? 'Not charged' :
     statusLabel(r.status);
 
@@ -75,7 +75,7 @@ function Row({ r }: { r: BookingRow }) {
       <div className="who">{r.guestName || r.email}<small>{r.guests} guest{r.guests === 1 ? '' : 's'}</small></div>
       <div className="sub num">{niceRange(r.checkIn, r.checkOut)}<br /><span style={{ color: 'var(--ink3)' }}>{r.nights} nt</span></div>
       <div className="sub num">{money(r.total)}</div>
-      <div><span className={`pill ${pillCls}`}>{statusLabel(r.status)}</span></div>
+      <div><StatusPill status={r.status} /></div>
       <div className="amt"><small>{progress}</small></div>
     </Link>
   );

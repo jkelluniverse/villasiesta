@@ -104,15 +104,17 @@ export async function createCardOnFile(input: { sourceId: string; verificationTo
   }
 }
 
-/** Owner "Send bill": a hosted Square payment link for an arbitrary amount. */
-export async function createPaymentLink(input: { name: string; amountCents: bigint; idempotencyKey: string }): Promise<{ ok: boolean; mock: boolean; url?: string; error?: string }> {
-  if (!squareConfigured()) return { ok: true, mock: true, url: `https://example.com/mock-pay-link` };
+/** Owner "Send bill": a hosted Square payment link for an arbitrary amount.
+ * Returns the link's orderId so the booking can be reconciled when the guest
+ * pays — payment-link payments carry no reference_id, only order_id. */
+export async function createPaymentLink(input: { name: string; amountCents: bigint; idempotencyKey: string }): Promise<{ ok: boolean; mock: boolean; url?: string; orderId?: string; error?: string }> {
+  if (!squareConfigured()) return { ok: true, mock: true, url: `https://example.com/mock-pay-link`, orderId: `mock_order_${Date.now()}` };
   try {
     const res = await square().checkout.paymentLinks.create({
       idempotencyKey: input.idempotencyKey,
       quickPay: { name: input.name, priceMoney: { amount: input.amountCents, currency: 'USD' }, locationId: locationId() },
     });
-    return { ok: true, mock: false, url: res.paymentLink?.url };
+    return { ok: true, mock: false, url: res.paymentLink?.url, orderId: res.paymentLink?.orderId };
   } catch (e) {
     return { ok: false, mock: false, error: squareErrorMessage(e) };
   }

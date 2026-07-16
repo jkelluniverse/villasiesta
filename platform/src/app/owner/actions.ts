@@ -79,6 +79,10 @@ export async function sendBill(bookingId: string): Promise<ActionResult> {
     });
     if (!link.ok || !link.url) return { ok: false, error: link.error || 'link_failed' };
 
+    // Remember the order so the webhook can reconcile this booking to PAID when
+    // the guest pays the link (link payments carry order_id, not reference_id).
+    if (link.orderId) await prisma.booking.update({ where: { id: b.id }, data: { squareOrderId: link.orderId } });
+
     await sendEmail({
       to: b.client.email, replyTo: notifyEmails()[0],
       subject: `Your payment link — ${b.property.name}`,
@@ -110,6 +114,34 @@ export async function declineBooking(bookingId: string): Promise<ActionResult> {
     await logComms(b.clientId, CommsType.EMAIL, 'declined');
     revalidatePath('/owner');
     revalidatePath('/owner/bookings');
+    return { ok: true };
+  } catch (e) {
+    return { ok: false, error: (e as Error).message };
+  }
+}
+
+/** Manual reconcile: mark an approved/partial booking as fully paid (payment
+ * collected off-platform, or a Square link that never reconciled). Locks dates. */
+export async function markPaid(bookingId: string): Promise<ActionResult> {
+  try {
+    await requireOwner();
+    await prisma.$transaction(async (tx) => {
+      const b = await tx.booking.findUnique({ where: { id: bookingId }, include: { block: true } });
+      if (!b) throw new Error('not_found');
+      if (b.status === BookingStatus.PAID) return;
+      if (b.status !== BookingStatus.APPROVED && b.status !== BookingStatus.PARTIALLY_PAID) throw new Error('not_payable');
+      await tx.booking.update({ where: { id: bookingId }, data: { status: BookingStatus.PAID, balancePaid: true, holdExpiresAt: null } });
+      if (!b.block) {
+        await tx.calendarBlock.create({
+          data: { propertyId: b.propertyId, startDate: parseKey(toKey(b.checkIn)), endDate: parseKey(toKey(b.checkOut)), source: 'BOOKING', bookingId: b.id, summary: 'Booked (direct)' },
+        });
+      }
+    });
+    const b = await prisma.booking.findUnique({ where: { id: bookingId }, select: { clientId: true } });
+    if (b) await logComms(b.clientId, CommsType.BILL, 'marked paid (manual reconcile)');
+    revalidatePath('/owner');
+    revalidatePath('/owner/bookings');
+    revalidatePath(`/owner/bookings/${bookingId}`);
     return { ok: true };
   } catch (e) {
     return { ok: false, error: (e as Error).message };

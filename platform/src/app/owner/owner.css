@@ -57,8 +57,13 @@
 .op-strip{display:flex;gap:3px;margin-top:14px}
 .op-strip i{flex:1;height:34px;border-radius:4px;background:var(--jade-s)}
 .op-strip i.on{background:var(--sapphire)}
-.op-arr{display:flex;justify-content:space-between;padding:11px 0;border-bottom:1px solid var(--hairline);font-size:.88rem}
+.op-arr{display:flex;justify-content:space-between;align-items:center;gap:10px;padding:11px 0;border-bottom:1px solid var(--hairline);font-size:.88rem}
 .op-arr:last-child{border-bottom:0}
+.op-arr-link{margin:0 -8px;padding:11px 8px;border-radius:10px}
+.op-arr-link:hover{background:var(--surface2)}
+.arr-view{padding:5px 10px;opacity:.55}
+.op-arr-link:hover .arr-view{opacity:1}
+@media(max-width:600px){.arr-view{opacity:1}}
 .op-arr .who{font-weight:600}
 .op-arr .when{color:var(--ink2)}
 .op-note{font-size:.78rem;color:var(--ink3);margin-top:10px}
@@ -82,13 +87,27 @@
 .op-navlink.on{color:var(--brand);background:var(--sapphire-s);font-weight:600}
 @media(max-width:720px){.op-nav{gap:0;font-size:.8rem}.op-navlink{padding:8px 8px}}
 
-/* status pills (shared) */
-.pill{display:inline-flex;align-items:center;gap:6px;font-size:.72rem;font-weight:600;padding:4px 11px;border-radius:999px;white-space:nowrap}
-.pill.requested{background:var(--topaz-s);color:var(--topaz)}
-.pill.approved{background:#fff;color:var(--sapphire);border:1px solid var(--sapphire)}
-.pill.partially_paid{background:var(--plum-s);color:var(--plum)}
-.pill.paid{background:var(--jade-s);color:var(--jade)}
-.pill.cancelled,.pill.expired{background:#eef0f3;color:var(--ink3)}
+/* status pills (shared) — keyed by tone, driven by displayStatus() */
+.pill{display:inline-flex;align-items:center;gap:6px;font-size:.72rem;font-weight:600;padding:4px 11px;border-radius:999px;white-space:nowrap;line-height:1.2}
+.pill.topaz{background:var(--topaz-s);color:var(--topaz)}
+.pill.sapphire{background:#fff;color:var(--sapphire);border:1px solid var(--sapphire)}
+.pill.plum{background:var(--plum-s);color:var(--plum)}
+.pill.jade{background:var(--jade-s);color:var(--jade)}
+.pill.muted{background:#eef0f3;color:var(--ink3)}
+
+/* full-width status banner (booking detail) */
+.bd-banner{display:block;border-radius:14px;padding:14px 18px;margin-top:16px;font-size:.95rem;font-weight:600;line-height:1.4}
+.bd-banner.topaz{background:var(--topaz-s);color:var(--topaz)}
+.bd-banner.sapphire{background:var(--sapphire-s);color:var(--sapphire)}
+.bd-banner.plum{background:var(--plum-s);color:var(--plum)}
+.bd-banner.jade{background:var(--jade-s);color:var(--jade)}
+.bd-banner.muted{background:#eef0f3;color:var(--ink3)}
+
+/* labeled "View booking" button (replaces the bare arrow) */
+.op-view{border:1px solid var(--hairline);background:var(--surface2);color:var(--ink2);border-radius:10px;padding:8px 14px;font-size:.8rem;font-weight:600;text-decoration:none;white-space:nowrap}
+.op-view:hover{background:var(--surface);color:var(--ink)}
+@media(max-width:560px){.op-view .full{display:none}}
+@media(min-width:561px){.op-view .short{display:none}}
 
 /* bookings list */
 .bk-tabs{display:flex;gap:6px;margin:4px 0 18px;flex-wrap:wrap}
@@ -97,7 +116,8 @@
 .bk-search{margin-left:auto;display:flex;gap:8px}
 .bk-search input{padding:8px 12px;border:1px solid var(--hairline);border-radius:999px;font:inherit;font-size:.85rem;background:var(--surface);min-width:200px}
 .bk-list{background:var(--surface);border-radius:20px;box-shadow:var(--shadow-1),var(--shadow-2);overflow:hidden}
-.bk-row{display:grid;grid-template-columns:1.4fr 1.5fr .7fr 1fr auto;gap:14px;align-items:center;padding:15px 22px;border-bottom:1px solid var(--hairline);text-decoration:none;color:var(--ink)}
+.bk-row{display:grid;grid-template-columns:1.3fr 1.2fr .6fr 1.5fr .9fr;gap:14px;align-items:center;padding:15px 22px;border-bottom:1px solid var(--hairline);text-decoration:none;color:var(--ink)}
+.bk-row .pill{white-space:normal}
 .bk-row:last-child{border-bottom:0}
 .bk-row:hover{background:var(--surface2)}
 .bk-row .who{font-weight:600;font-size:.94rem}

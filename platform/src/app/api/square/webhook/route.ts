@@ -28,34 +28,51 @@ export async function POST(req: NextRequest) {
     console.warn('[square:webhook] SQUARE_WEBHOOK_SIGNATURE_KEY not set — skipping verification');
   }
 
-  let evt: { type?: string; data?: { object?: { payment?: { id?: string; status?: string; reference_id?: string; referenceId?: string } } } } = {};
+  let evt: { type?: string; data?: { object?: { payment?: { id?: string; status?: string; reference_id?: string; referenceId?: string; order_id?: string; orderId?: string } } } } = {};
   try { evt = JSON.parse(raw); } catch { return NextResponse.json({ ok: true, note: 'unparseable' }); }
 
   const payment = evt.data?.object?.payment;
   if (!payment || !evt.type?.startsWith('payment.')) return NextResponse.json({ ok: true, note: 'ignored' });
 
   const ref = payment.reference_id || payment.referenceId || '';
-  const kind = ref.endsWith('-deposit') ? 'deposit' : ref.endsWith('-balance') ? 'balance' : 'full';
-  const bookingId = ref.replace(/-(deposit|balance)$/, '');
-  const booking = bookingId
-    ? await prisma.booking.findUnique({ where: { id: bookingId }, include: { block: true, client: true } })
-    : await prisma.booking.findFirst({ where: { squarePaymentId: payment.id }, include: { block: true, client: true } });
+  const orderId = payment.order_id || payment.orderId || '';
+  const refBookingId = ref.replace(/-(deposit|balance)$/, '');
+
+  // Match order: reference_id (finalize flow) → stored payment id → stored order
+  // id (owner "Send bill" payment link, which carries no reference_id).
+  let booking = refBookingId
+    ? await prisma.booking.findUnique({ where: { id: refBookingId }, include: { block: true, client: true } })
+    : null;
+  if (!booking && payment.id) booking = await prisma.booking.findFirst({ where: { squarePaymentId: payment.id }, include: { block: true, client: true } });
+  if (!booking && orderId) booking = await prisma.booking.findFirst({ where: { squareOrderId: orderId }, include: { block: true, client: true } });
   if (!booking) return NextResponse.json({ ok: true, note: 'no matching booking' });
 
+  // A payment link matched by order id pays whatever is outstanding: the
+  // scheduled balance on a split, otherwise the full amount.
+  const viaLink = !ref && !!orderId;
+  const kind = ref.endsWith('-deposit') ? 'deposit'
+    : ref.endsWith('-balance') ? 'balance'
+    : viaLink && booking.paymentPlan === 'SPLIT' && booking.status === BookingStatus.PARTIALLY_PAID ? 'balance'
+    : 'full';
+
   const status = payment.status || '';
-  console.log(`[square:webhook] ${evt.type} payment=${payment.id} status=${status} ref=${ref} booking=${booking.id}`);
+  console.log(`[square:webhook] ${evt.type} payment=${payment.id} status=${status} ref=${ref || '(link)'} order=${orderId} booking=${booking.id}`);
 
   if (status === 'COMPLETED') {
     const target = kind === 'balance' ? BookingStatus.PAID
       : booking.paymentPlan === 'SPLIT' && kind === 'deposit' ? BookingStatus.PARTIALLY_PAID : BookingStatus.PAID;
     // A real transition happened here (vs. a webhook echoing a synchronous update)?
     const transitioned = kind === 'balance' ? !booking.balancePaid : (booking.status !== BookingStatus.PAID && booking.status !== target);
+    // Persist the payment id if we didn't have one (link payments especially).
+    const patchPaymentId = payment.id && !booking.squarePaymentId ? { squarePaymentId: payment.id } : {};
 
     await prisma.$transaction(async (tx) => {
       if (kind === 'balance') {
-        if (!booking.balancePaid) await tx.booking.update({ where: { id: booking.id }, data: { balancePaid: true, status: BookingStatus.PAID } });
+        if (!booking.balancePaid) await tx.booking.update({ where: { id: booking.id }, data: { balancePaid: true, status: BookingStatus.PAID, ...patchPaymentId } });
       } else if (transitioned) {
-        await tx.booking.update({ where: { id: booking.id }, data: { status: target, balancePaid: target === BookingStatus.PAID, holdExpiresAt: null } });
+        await tx.booking.update({ where: { id: booking.id }, data: { status: target, balancePaid: target === BookingStatus.PAID, holdExpiresAt: null, ...patchPaymentId } });
+      } else if (Object.keys(patchPaymentId).length) {
+        await tx.booking.update({ where: { id: booking.id }, data: patchPaymentId });
       }
       if (!booking.block) {
         await tx.calendarBlock.create({

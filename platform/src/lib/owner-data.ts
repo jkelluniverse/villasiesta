@@ -5,10 +5,11 @@ import { addDays, toKey, todayKey } from './dates';
 
 export type Metric = { netThisMonth: number; netDeltaPct: number | null; prevMonthLabel: string; occupancyPct: number; ytdNet: number; nextPayout: { amount: number; date: string } | null };
 export type AttentionItem = {
-  bookingId: string; type: 'request' | 'payment' | 'conflict';
+  bookingId: string; type: 'request' | 'payment' | 'balance_failed' | 'conflict';
+  status: BookingStatus;
   name: string; email: string; phone: string | null; dates: string; nights: number; total: number; guests: number; message?: string | null;
 };
-export type Arrival = { bookingId: string; name: string; checkIn: string; checkOut: string; nights: number; phone: string | null; email: string };
+export type Arrival = { bookingId: string; status: BookingStatus; name: string; checkIn: string; checkOut: string; nights: number; phone: string | null; email: string };
 export type Dashboard = {
   currency: string; ownerName: string; month: string;
   metric: Metric; attention: AttentionItem[]; occupancy30: { date: string; booked: boolean }[]; arrivals: Arrival[];
@@ -67,16 +68,22 @@ export async function getDashboard(slug: string): Promise<Dashboard | null> {
   const upcoming = consuming.filter((b) => toKey(b.checkOut) > today).sort((a, b) => (toKey(a.checkIn) < toKey(b.checkIn) ? -1 : 1));
   const nextPayout = upcoming.length ? { amount: netOf(upcoming[0]), date: toKey(upcoming[0].checkIn) } : null;
 
+  // Queue holds ONLY actionable items, re-derived from live status every load.
+  // PAID (and PARTIALLY_PAID that's still on schedule) never appear here.
   const attention: AttentionItem[] = [];
   bookings.forEach((b) => {
     const nm = `${b.client.firstName} ${b.client.lastName}`.trim();
     const dates = `${toKey(b.checkIn)} → ${toKey(b.checkOut)}`;
+    const base = { bookingId: b.id, status: b.status, name: nm, email: b.client.email, phone: b.client.phone, dates, nights: b.nights, total: Math.round(b.total), guests: b.guests };
     if (b.status === BookingStatus.REQUESTED)
-      attention.push({ bookingId: b.id, type: 'request', name: nm, email: b.client.email, phone: b.client.phone, dates, nights: b.nights, total: Math.round(b.total), guests: b.guests, message: b.message });
+      attention.push({ ...base, type: 'request', message: b.message });
     else if (b.status === BookingStatus.APPROVED)
-      attention.push({ bookingId: b.id, type: 'payment', name: nm, email: b.client.email, phone: b.client.phone, dates, nights: b.nights, total: Math.round(b.total), guests: b.guests });
+      attention.push({ ...base, type: 'payment' });
+    else if (b.status === BookingStatus.PARTIALLY_PAID && !b.balancePaid && b.balanceDueDate && toKey(b.balanceDueDate) < today)
+      // Deposit paid, balance charge was due and hasn't cleared → needs a retry.
+      attention.push({ ...base, type: 'balance_failed' });
   });
-  const order = { request: 0, conflict: 1, payment: 2 };
+  const order = { request: 0, conflict: 1, balance_failed: 2, payment: 3 };
   attention.sort((a, b) => order[a.type] - order[b.type]);
 
   const occupancy30 = Array.from({ length: 30 }, (_, i) => {
@@ -85,7 +92,7 @@ export async function getDashboard(slug: string): Promise<Dashboard | null> {
   });
 
   const arrivals: Arrival[] = consuming.filter((b) => toKey(b.checkIn) >= today).slice(0, 6).map((b) => ({
-    bookingId: b.id, name: `${b.client.firstName} ${b.client.lastName}`.trim(),
+    bookingId: b.id, status: b.status, name: `${b.client.firstName} ${b.client.lastName}`.trim(),
     checkIn: toKey(b.checkIn), checkOut: toKey(b.checkOut), nights: b.nights, phone: b.client.phone, email: b.client.email,
   }));
 
