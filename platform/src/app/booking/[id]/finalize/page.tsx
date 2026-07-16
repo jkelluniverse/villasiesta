@@ -3,9 +3,12 @@ import { loadPropertyPricing, computeQuote } from '@/lib/pricing';
 import { splitEligible } from '@/lib/finalize';
 import { toKey } from '@/lib/dates';
 import { squareConfigured, squareEnvironment } from '@/lib/square';
+import { TRANSFER_APPS, HOST_NAME, HOST_PHONE } from '@/lib/manual';
 import { BookingStatus } from '@prisma/client';
 import Link from 'next/link';
 import FinalizeForm from './FinalizeForm';
+
+const ACH_PCT = 1;
 
 export const dynamic = 'force-dynamic';
 
@@ -29,10 +32,13 @@ export default async function FinalizePage({ params }: { params: { id: string } 
   const cardPct = loaded?.pricing.fees.cardPercent ?? 3;
   const baseTotal = baseQuote?.ok ? baseQuote.total : Math.round(booking.total);
   const cardTotal = Math.round(baseTotal * (1 + cardPct / 100));
+  const achTotal = Math.round(baseTotal * (1 + ACH_PCT / 100));
 
   return (
     <main className="wrap finalize" style={{ padding: '110px 0 80px' }}>
-      <div className="fin-head"><span className="badge approved">✓ Approved</span><h1 className="lead" style={{ marginTop: 10 }}>Finalize your stay</h1></div>
+      <div className="fin-head"><span className="badge approved">✓ Approved</span><h1 className="lead" style={{ marginTop: 10 }}>Finalize your stay</h1>
+        <div className="fin-ref">Reservation <b>{booking.reference}</b></div>
+      </div>
       <div className="fin-grid">
         <aside className="fin-summary">
           <h3 style={{ fontFamily: 'var(--font-display)', fontSize: '1.6rem' }}>{booking.property.name}</h3>
@@ -42,8 +48,8 @@ export default async function FinalizePage({ params }: { params: { id: string } 
               {baseQuote.lines.map((l, k) => (
                 <div className="r" key={k}><span>{l.label.replace(/^(\d)/, (m0) => cur + m0)}</span><span className="tnum">{cur}{Math.round(l.amount).toLocaleString()}</span></div>
               ))}
-              <div className="r total"><span>Total (bank / cash app)</span><b className="tnum">{cur}{baseTotal.toLocaleString()}</b></div>
-              <div className="r hint">Paying by card adds {cardPct}% ({cur}{cardTotal.toLocaleString()} total) — disclosed here and on your receipt.</div>
+              <div className="r total"><span>Total (transfer app · no fee)</span><b className="tnum">{cur}{baseTotal.toLocaleString()}</b></div>
+              <div className="r hint">Processing fees, disclosed here and on your receipt: bank transfer +{ACH_PCT}% ({cur}{achTotal.toLocaleString()}), card +{cardPct}% ({cur}{cardTotal.toLocaleString()}). Cash App / Venmo / Zelle / Chime have no fee.</div>
             </div>
           ) : null}
         </aside>
@@ -51,16 +57,23 @@ export default async function FinalizePage({ params }: { params: { id: string } 
         <section className="fin-pay">
           <FinalizeForm
             bookingId={booking.id}
+            reference={booking.reference}
+            lastName={booking.client.lastName}
             currency={cur}
             baseTotal={baseTotal}
             cardTotal={cardTotal}
+            achTotal={achTotal}
             cardPct={cardPct}
+            achPct={ACH_PCT}
             splitEligible={splitEligible(ci)}
             guestName={`${booking.client.firstName} ${booking.client.lastName}`.trim()}
             squareConfigured={squareConfigured()}
             squareEnv={squareEnvironment()}
             appId={process.env.NEXT_PUBLIC_SQUARE_APPLICATION_ID || ''}
             locationId={process.env.NEXT_PUBLIC_SQUARE_LOCATION_ID || ''}
+            transferApps={TRANSFER_APPS}
+            hostName={HOST_NAME}
+            hostPhone={HOST_PHONE}
           />
         </section>
       </div>

@@ -5,6 +5,11 @@ type Method = 'ach' | 'card' | 'zelle' | 'cashapp' | 'venmo' | 'chime';
 const MANUAL: Method[] = ['zelle', 'cashapp', 'venmo', 'chime'];
 const money = (c: string, n: number) => c + Math.round(n).toLocaleString();
 
+// method (lowercase UI) -> PaymentMethod enum
+const ENUM: Record<string, string> = { zelle: 'ZELLE', cashapp: 'CASHAPP', venmo: 'VENMO', chime: 'CHIME' };
+
+type TransferApp = { key: string; label: string; handle: string; sub?: string };
+
 // Minimal Web Payments SDK surface we use.
 type SqTokenResult = { status: string; token?: string; errors?: { message?: string }[] };
 type SqCard = { attach: (sel: string) => Promise<void>; tokenize: () => Promise<SqTokenResult>; destroy?: () => Promise<void> };
@@ -17,9 +22,11 @@ type SqPayments = {
 declare global { interface Window { Square?: { payments: (appId: string, locationId: string) => SqPayments } } }
 
 export default function FinalizeForm(props: {
-  bookingId: string; currency: string; baseTotal: number; cardTotal: number; cardPct: number;
+  bookingId: string; reference: string; lastName: string;
+  currency: string; baseTotal: number; cardTotal: number; achTotal: number; cardPct: number; achPct: number;
   splitEligible: boolean; guestName: string; squareConfigured: boolean; squareEnv: string;
   appId: string; locationId: string;
+  transferApps: TransferApp[]; hostName: string; hostPhone: string;
 }) {
   const { currency: cur } = props;
   const [method, setMethod] = useState<Method>('ach');
@@ -27,6 +34,8 @@ export default function FinalizeForm(props: {
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState('');
   const [notice, setNotice] = useState('');
+  const [copied, setCopied] = useState(false);
+  const [claimed, setClaimed] = useState<string | null>(null);
   const [sdkReady, setSdkReady] = useState(false);
   const paymentsRef = useRef<SqPayments | null>(null);
   const cardRef = useRef<SqCard | null>(null);
@@ -34,7 +43,6 @@ export default function FinalizeForm(props: {
 
   const useSquare = props.squareConfigured && !!props.appId && !!props.locationId;
 
-  // Load the Web Payments SDK and init payments once.
   useEffect(() => {
     if (!useSquare) return;
     const src = props.squareEnv === 'production' ? 'https://web.squarecdn.com/v1/square.js' : 'https://sandbox.web.squarecdn.com/v1/square.js';
@@ -53,7 +61,6 @@ export default function FinalizeForm(props: {
     document.body.appendChild(s);
   }, [useSquare, props.appId, props.locationId, props.squareEnv]);
 
-  // Attach the card element whenever the card method is selected.
   useEffect(() => {
     (async () => {
       if (!useSquare || !sdkReady || method !== 'card' || cardAttached.current) return;
@@ -69,10 +76,34 @@ export default function FinalizeForm(props: {
   }, [useSquare, sdkReady, method]);
 
   const isManual = MANUAL.includes(method);
-  const total = method === 'card' ? props.cardTotal : props.baseTotal;
+  const total = method === 'card' ? props.cardTotal : method === 'ach' ? props.achTotal : props.baseTotal;
   const showSplit = props.splitEligible && method === 'card';   // split runs on a card
   const effectivePlan = showSplit ? plan : 'full';
   const showTotal = effectivePlan === 'split' ? Math.round(total / 2) : total;
+
+  const memo = `Villa Siesta ${props.reference} — ${props.lastName}`;
+  const app = props.transferApps.find((a) => a.key === ENUM[method]);
+
+  async function copyMemo() {
+    try { await navigator.clipboard.writeText(memo); setCopied(true); setTimeout(() => setCopied(false), 1800); }
+    catch { /* clipboard blocked — the text is visible to select manually */ }
+  }
+
+  async function claim() {
+    setErr(''); setBusy(true);
+    try {
+      const res = await fetch(`/api/bookings/${props.bookingId}/claim-manual`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ method: ENUM[method], amount: total }),
+      });
+      const data = await res.json();
+      if (!res.ok) { setErr(data.message || 'Could not record that. Please reply to your approval email.'); setBusy(false); return; }
+      setClaimed(app?.label || methodLabel[method]);
+    } catch {
+      setErr('Network error — please reply to your approval email so we can confirm.');
+    }
+    setBusy(false);
+  }
 
   async function post(sourceId?: string, verificationToken?: string) {
     const res = await fetch(`/api/bookings/${props.bookingId}/finalize`, {
@@ -91,7 +122,6 @@ export default function FinalizeForm(props: {
     e.preventDefault();
     setErr(''); setBusy(true);
 
-    // Mock/dev path — Square not configured: simulate server-side.
     if (!useSquare) { await post(undefined); return; }
     if (!sdkReady || !paymentsRef.current) { setErr('The secure payment form is still loading — try again in a moment.'); setBusy(false); return; }
 
@@ -116,7 +146,6 @@ export default function FinalizeForm(props: {
         setBusy(false); return;
       }
 
-      // Split needs buyer verification so the card can be stored for the balance.
       let verificationToken: string | undefined;
       if (effectivePlan === 'split' && method === 'card') {
         const [givenName, ...rest] = (props.guestName || 'Guest').split(' ');
@@ -139,6 +168,16 @@ export default function FinalizeForm(props: {
 
   const methodLabel: Record<Method, string> = { ach: 'Bank transfer (ACH)', card: 'Credit / Debit card', zelle: 'Zelle', cashapp: 'Cash App', venmo: 'Venmo', chime: 'Chime' };
 
+  if (claimed) {
+    return (
+      <div className="pay-manual" style={{ textAlign: 'center' }}>
+        <div style={{ fontSize: '2rem', marginBottom: 8 }}>⏳</div>
+        <h3 className="fin-h" style={{ marginBottom: 6 }}>Thanks — we&apos;ll confirm receipt within 1 business day.</h3>
+        <p>Your dates are held while we verify your <b>{claimed}</b> payment. Reservation <b>{props.reference}</b>. Watch your email — we&apos;ll send confirmation once it lands.</p>
+      </div>
+    );
+  }
+
   return (
     <form onSubmit={pay}>
       <h3 className="fin-h">How you&apos;ll pay</h3>
@@ -148,7 +187,7 @@ export default function FinalizeForm(props: {
           <label key={m} className={`pay-opt${method === m ? ' on' : ''}`}>
             <input type="radio" name="method" checked={method === m} onChange={() => setMethod(m)} />
             <span>{methodLabel[m]}</span>
-            <em>{m === 'ach' ? 'no fee' : `+${props.cardPct}%`}</em>
+            <em>{m === 'ach' ? `+${props.achPct}%` : `+${props.cardPct}%`}</em>
           </label>
         ))}
         {MANUAL.map((m) => (
@@ -169,8 +208,28 @@ export default function FinalizeForm(props: {
       ) : null}
 
       {isManual ? (
-        <div className="pay-manual">
-          <p>Send <b>{money(cur, total)}</b> via <b>{methodLabel[method]}</b> to the owner, then reply to your approval email so we can confirm. Your dates are held until then.</p>
+        <div className="pay-manual pay-transfer">
+          <p style={{ marginBottom: 12 }}>Send <b>{money(cur, total)}</b> to the owner via <b>{app?.label}</b>:</p>
+          <div className="tf-dest">
+            <span className="tf-app">{app?.label}</span>
+            <span className="tf-handle">{app?.handle}{app?.sub ? <em> · {app.sub}</em> : null}</span>
+          </div>
+          <p className="tf-reassure">All accounts are under <b>{props.hostName}</b>, {props.hostPhone}.</p>
+
+          <div className="tf-memo">
+            <div className="tf-memo-label">⚠️ Include this in the payment memo / note — exactly:</div>
+            <button type="button" className="tf-chip" onClick={copyMemo} title="Copy to clipboard">
+              <span className="tf-chip-text">{memo}</span>
+              <span className="tf-chip-copy">{copied ? 'Copied ✓' : 'Copy'}</span>
+            </button>
+            <div className="tf-memo-help">Payments without your reservation number and last name can&apos;t be matched automatically and may delay your confirmation.</div>
+          </div>
+
+          {err ? <div className="formerr">{err}</div> : null}
+          <button type="button" className="btn btn-navy" style={{ width: '100%', marginTop: 6 }} disabled={busy} onClick={claim}>
+            {busy ? 'One moment…' : `I've sent ${money(cur, total)} by ${app?.label}`}
+          </button>
+          <div className="pay-note">Don&apos;t mark this until you&apos;ve actually sent it — the owner verifies every transfer before confirming.</div>
         </div>
       ) : (
         <>

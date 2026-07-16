@@ -96,10 +96,13 @@ function detailCard(rows: [string, string][]) {
 
 // =================================================================== GUEST
 type B = {  // minimal booking shape the templates need
-  id: string; firstName: string; checkIn: Date | string; checkOut: Date | string;
+  id: string; reference?: string; firstName: string; checkIn: Date | string; checkOut: Date | string;
   nights: number; guests: number; total: number;
   depositAmount?: number | null; balanceAmount?: number | null; balanceDueDate?: Date | string | null;
 };
+
+/** A "Reference" row for the top of any detail card (omitted if absent). */
+const refRow = (b: B): [string, string][] => (b.reference ? [['Reference', b.reference]] : []);
 
 export function requestReceived(b: B) {
   const subject = "We got your Villa Siesta request";
@@ -110,6 +113,7 @@ export function requestReceived(b: B) {
     bodyHtml:
       para(`We've sent it to the owner. You'll get an email the moment it's approved — <b style="color:${INK}">nothing has been charged.</b> The owner typically responds within 24–48 hours.`) +
       detailCard([
+        ...refRow(b),
         ["Dates", `${fmtDate(b.checkIn)} → ${fmtDate(b.checkOut)}`],
         ["Nights", String(b.nights)], ["Guests", String(b.guests)],
         ["Estimated total", fmtUSD(b.total)],
@@ -128,6 +132,7 @@ export function approvedFinalize(b: B) {
     bodyHtml:
       para(`The owner approved your request and is holding your dates. Complete payment to confirm your reservation.`) +
       detailCard([
+        ...refRow(b),
         ["Dates", `${fmtDate(b.checkIn)} → ${fmtDate(b.checkOut)}`],
         ["Total", fmtUSD(b.total)],
       ]),
@@ -146,6 +151,7 @@ export function depositReceipt(b: B) {
     bodyHtml:
       para(`Your deposit is in and your dates are secured. The remaining balance will be charged automatically to your saved card.`) +
       detailCard([
+        ...refRow(b),
         ["Dates", `${fmtDate(b.checkIn)} → ${fmtDate(b.checkOut)}`],
         ["Deposit paid", fmtUSD(b.depositAmount ?? b.total / 2)],
         ["Balance", fmtUSD(b.balanceAmount ?? b.total / 2)],
@@ -165,6 +171,7 @@ export function paidConfirmation(b: B) {
     bodyHtml:
       para(`Payment received — your reservation is confirmed. We'll email your arrival details (door code, Wi-Fi, directions) before check-in.`) +
       detailCard([
+        ...refRow(b),
         ["Dates", `${fmtDate(b.checkIn)} → ${fmtDate(b.checkOut)}`],
         ["Guests", String(b.guests)],
         ["Paid", fmtUSD(b.total)],
@@ -201,6 +208,7 @@ export function arrivalInfo(b: B, p: {
     title: `Almost time, ${b.firstName} — here's everything you need.`,
     bodyHtml:
       detailCard([
+        ...refRow(b),
         ["Check-in", `${fmtDate(b.checkIn)} · after ${p.checkinTime}`],
         ["Check-out", `${fmtDate(b.checkOut)} · by ${p.checkoutTime}`],
         ["Address", p.address],
@@ -240,13 +248,14 @@ export function declined(b: B) {
 
 // =================================================================== OWNER
 export function ownerNewRequest(b: B & { lastName: string; email: string; phone?: string; message?: string }) {
-  const subject = `New booking request — ${b.firstName} ${b.lastName} — ${fmtDate(b.checkIn)} → ${fmtDate(b.checkOut)}`;
+  const subject = `New booking request${b.reference ? ` [${b.reference}]` : ""} — ${b.firstName} ${b.lastName} — ${fmtDate(b.checkIn)} → ${fmtDate(b.checkOut)}`;
   const html = layout({
     preheader: `${b.nights} nights · ${b.guests} guests · est. ${fmtUSD(b.total)}`,
     badge: { label: "● Needs review", bg: "#F6EEDA", ink: "#8A6B1E" },
     title: `${b.firstName} ${b.lastName} wants to book.`,
     bodyHtml:
       detailCard([
+        ...refRow(b),
         ["Dates", `${fmtDate(b.checkIn)} → ${fmtDate(b.checkOut)} · ${b.nights} nt`],
         ["Guests", String(b.guests)], ["Est. total", fmtUSD(b.total)],
         ["Email", b.email], ["Phone", b.phone || "—"],
@@ -258,16 +267,38 @@ export function ownerNewRequest(b: B & { lastName: string; email: string; phone?
 
 export function ownerPaymentAlert(b: B & { lastName: string }, kind: "deposit" | "balance" | "full") {
   const label = kind === "deposit" ? "Deposit received" : kind === "balance" ? "Balance received" : "Paid in full";
-  const subject = `${label} — ${b.firstName} ${b.lastName} — ${fmtUSD(kind === "deposit" ? (b.depositAmount ?? 0) : kind === "balance" ? (b.balanceAmount ?? 0) : b.total)}`;
+  const subject = `${label}${b.reference ? ` [${b.reference}]` : ""} — ${b.firstName} ${b.lastName} — ${fmtUSD(kind === "deposit" ? (b.depositAmount ?? 0) : kind === "balance" ? (b.balanceAmount ?? 0) : b.total)}`;
   const html = layout({
     preheader: `${fmtDate(b.checkIn)} → ${fmtDate(b.checkOut)}`,
     badge: { label: `✓ ${label}`, bg: "#E7F1EB", ink: "#2C6E52" },
     title: `${label} for ${b.firstName}'s stay.`,
     bodyHtml: detailCard([
+      ...refRow(b),
       ["Dates", `${fmtDate(b.checkIn)} → ${fmtDate(b.checkOut)}`],
       ["Booking total", fmtUSD(b.total)],
     ]),
     cta: { label: "Open the booking", url: `${SITE}/owner` },
+  });
+  return { subject, html, text: textFallback(subject, b) };
+}
+
+/** Guest pressed "I've sent it" by a transfer app — owner + dad must verify receipt. */
+export function ownerManualClaim(b: B & { lastName: string }, opts: { app: string; amount: number }) {
+  const subject = `Manual payment claimed — verify${b.reference ? ` [${b.reference}]` : ""} — ${b.firstName} ${b.lastName} — ${opts.app} ${fmtUSD(opts.amount)}`;
+  const html = layout({
+    preheader: `${b.firstName} ${b.lastName} says they sent ${fmtUSD(opts.amount)} by ${opts.app}. Confirm receipt, then record it.`,
+    badge: { label: "● Verify receipt", bg: "#F6EEDA", ink: "#8A6B1E" },
+    title: `${b.firstName} says they paid by ${opts.app}.`,
+    bodyHtml:
+      para(`Check your <b style="color:${INK}">${opts.app}</b> for <b style="color:${INK}">${fmtUSD(opts.amount)}</b> with this reservation in the memo. Once you see it, open the booking and <b style="color:${INK}">Record manual payment</b> — nothing is marked paid until you do.`) +
+      detailCard([
+        ...refRow(b),
+        ["Guest", `${b.firstName} ${b.lastName}`],
+        ["Claimed via", opts.app],
+        ["Amount", fmtUSD(opts.amount)],
+        ["Dates", `${fmtDate(b.checkIn)} → ${fmtDate(b.checkOut)}`],
+      ]),
+    cta: { label: "Verify & record in the portal", url: `${SITE}/owner` },
   });
   return { subject, html, text: textFallback(subject, b) };
 }

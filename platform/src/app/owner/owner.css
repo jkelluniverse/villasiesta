@@ -159,3 +159,14 @@
 @media(max-width:560px){.ae-two{grid-template-columns:1fr}}
 .ae-check{display:flex;align-items:center;gap:9px;margin-top:18px;font-size:.86rem;font-weight:500;color:var(--ink);text-transform:none;letter-spacing:0}
 .ae-check input{width:auto}
+.ae select{width:100%;padding:.65rem .8rem;border:1px solid var(--hairline);border-radius:12px;font:inherit;font-size:.92rem;background:var(--surface2);color:var(--ink)}
+.ae input[type=date]{width:100%;padding:.6rem .8rem;border:1px solid var(--hairline);border-radius:12px;font:inherit;font-size:.92rem;background:var(--surface2);color:var(--ink)}
+
+/* reservation reference chips */
+.bk-ref{letter-spacing:.04em}
+.bd-ref{font-size:.8rem;font-weight:700;letter-spacing:.06em;color:var(--brand);background:var(--sapphire-s);border-radius:8px;padding:3px 10px}
+
+/* record-manual-payment modal */
+.mp-overlay{position:fixed;inset:0;z-index:50;background:rgba(16,24,40,.4);backdrop-filter:blur(2px);display:flex;align-items:center;justify-content:center;padding:20px}
+.mp-modal{background:var(--surface);border-radius:20px;box-shadow:var(--shadow-2);padding:24px;width:100%;max-width:460px;max-height:90vh;overflow:auto}
+.mp-modal h2{font-size:1.1rem;font-weight:600}

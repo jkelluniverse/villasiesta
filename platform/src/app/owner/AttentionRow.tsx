@@ -26,16 +26,22 @@ export default function AttentionRow({ item, currency, isOwner }: { item: Attent
     item.type === 'request' ? `Request · ${item.name}` :
     item.type === 'payment' ? `Awaiting payment · ${item.name}` :
     item.type === 'balance_failed' ? `Balance failed · ${item.name}` :
+    item.type === 'manual_claim' ? `${item.unverified ? 'Unverified — ' : ''}Payment claimed · ${item.name}` :
+    item.type === 'manual_balance' ? `Manual balance due · ${item.name}` :
     `Conflict · ${item.name}`;
+
+  const dot =
+    item.type === 'balance_failed' || item.type === 'manual_claim' ? 'conflict' :
+    item.type === 'manual_balance' ? 'payment' : item.type;
 
   return (
     <div className="op-row">
-      <span className={`op-dot dot-${item.type === 'balance_failed' ? 'conflict' : item.type}`} />
+      <span className={`op-dot dot-${dot}`} />
       <div className="main">
         <div className="title" style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
           {title}<StatusPill status={item.status} />
         </div>
-        <div className="meta num">{item.dates} · {item.nights} nt · {item.guests} guests · {money(currency, item.total)}{item.message ? ` · “${item.message}”` : ''}</div>
+        <div className="meta num">{item.dates} · {item.nights} nt · {item.guests} guests · {money(currency, item.total)}{item.app ? ` · via ${item.app}` : ''}{item.type === 'manual_balance' && item.dueDate ? ` · due ${item.dueDate}` : ''}{item.message ? ` · “${item.message}”` : ''}</div>
         {err ? <div className="meta" style={{ color: 'var(--garnet)' }}>{err}</div> : null}
       </div>
       <div className="acts">
@@ -50,6 +56,12 @@ export default function AttentionRow({ item, currency, isOwner }: { item: Attent
             <button className="op-btn op-btn-primary" disabled={pending} onClick={() => act(approveBooking, 'Approved')}>{pending ? '…' : 'Approve'}</button>
             <button className="op-btn op-btn-danger" disabled={pending} onClick={() => act(declineBooking, 'Declined')}>Decline</button>
           </>
+        ) : item.type === 'manual_claim' ? (
+          isOwner
+            ? <Link className="op-btn op-btn-primary" href={`/owner/bookings/${item.bookingId}`}>Verify &amp; record →</Link>
+            : <span className="op-role">Awaiting owner</span>
+        ) : item.type === 'manual_balance' ? (
+          <span className="op-role">Reminder emailed</span>
         ) : (item.type === 'payment' || item.type === 'balance_failed') && isOwner ? (
           <button className="op-btn op-btn-primary" disabled={pending} onClick={() => act(sendBill, 'Link sent')}>{pending ? '…' : item.type === 'balance_failed' ? 'Retry — send link' : 'Send payment link'}</button>
         ) : (item.type === 'payment' || item.type === 'balance_failed') ? (

@@ -2,11 +2,13 @@ import { prisma } from './db';
 import { BookingStatus } from '@prisma/client';
 import { getPaymentDetails, type PaymentDetails } from './square';
 import { displayStatus, planLabel, type StatusTone } from './bookingStatus';
+import { appLabel } from './manual';
 import { toKey, todayKey } from './dates';
 
 // ------------------------------------------------------------------ list
 export type BookingRow = {
   id: string;
+  reference: string;
   guestName: string;
   email: string;
   phone: string | null;
@@ -41,6 +43,7 @@ export async function listBookings(slug: string): Promise<BookingRow[]> {
     const paidAmount = paidOf(b);
     return {
       id: b.id,
+      reference: b.reference,
       guestName: `${b.client.firstName} ${b.client.lastName}`.trim(),
       email: b.client.email,
       phone: b.client.phone,
@@ -76,11 +79,12 @@ export function filterBookings(rows: BookingRow[], tab: BookingTab, q: string): 
 
 // ---------------------------------------------------------------- detail
 export type PaymentRecord = {
-  label: string;                 // "Deposit", "Balance", "Paid in full"
+  label: string;                 // "Deposit", "Balance", "Paid in full", or app name
   amount: number;                // what we intended to collect (dollars)
   state: 'paid' | 'scheduled' | 'pending' | 'failed';
   when: string | null;           // date paid or scheduled (yyyy-mm-dd)
-  method: string | null;         // CARD / ACH etc.
+  method: string | null;         // CARD / ACH / CASHAPP etc.
+  memo: string | null;           // manual-payment memo, pasted as received
   live: PaymentDetails | null;   // live Square record; .ok=false means the lookup FAILED
 };
 
@@ -90,12 +94,15 @@ export type ActivityEntry = { at: string; type: string; detail: string | null };
 
 export type BookingDetail = {
   id: string;
+  reference: string;
   currency: string;
   propertyName: string;
   status: BookingStatus;
   statusLabel: string;
   planLabel: string;
   banner: Banner;
+  manualClaimApp: string | null;
+  manualClaimAt: string | null;
   guestName: string;
   firstName: string;
   email: string;
@@ -146,40 +153,51 @@ export async function getBookingDetail(id: string): Promise<BookingDetail | null
   });
   const lastBill = comms.find((c) => c.type === 'BILL');
 
+  // Manual transfer-app receipts recorded by the owner (the paper trail).
+  const manualRows = await prisma.manualPayment.findMany({ where: { bookingId: b.id }, orderBy: { receivedAt: 'asc' } });
+
   // ---- Payment records, derived from live status ----
-  // The deposit/full payment id (if any) is stored; pull it live from Square for
-  // the real amount + processing fee + card. A record only "fails to load" when
-  // we HAVE an id but Square can't answer — never claim "nothing charged" then.
+  // Square: the deposit/full payment id is pulled live for real amount + fee +
+  // card (a record only "fails to load" if we HAVE an id but Square can't answer
+  // — never claim "nothing charged" then). Manual: each recorded receipt is a row.
   const payments: PaymentRecord[] = [];
   const charged = b.status === 'PAID' || b.status === 'PARTIALLY_PAID';
 
   let primaryWhen = toKey(b.updatedAt);
-  if (charged) {
-    let live: PaymentDetails | null = null;
-    if (b.squarePaymentId) {
-      live = await getPaymentDetails(b.squarePaymentId);
-      if (live.ok && live.createdAt) primaryWhen = toKey(live.createdAt);
-    }
+  if (charged && b.squarePaymentId) {
+    const live = await getPaymentDetails(b.squarePaymentId);
+    if (live.ok && live.createdAt) primaryWhen = toKey(live.createdAt);
     payments.push({
       label: split ? 'Deposit' : 'Paid in full',
       amount: Math.round(split ? (b.depositAmount ?? b.total / 2) : b.total),
-      state: 'paid',
-      when: primaryWhen,
-      method: b.paymentMethod,
-      live,
+      state: 'paid', when: primaryWhen, method: b.paymentMethod, memo: null, live,
+    });
+  }
+  for (const mp of manualRows) {
+    payments.push({
+      label: appLabel(mp.method), amount: Math.round(mp.amount), state: 'paid',
+      when: toKey(mp.receivedAt), method: mp.method, memo: mp.memo, live: null,
+    });
+  }
+  // Fallback so a paid booking never reads "nothing charged" (e.g. manual reconcile).
+  if (charged && !b.squarePaymentId && manualRows.length === 0) {
+    payments.push({
+      label: 'Paid (recorded manually)', amount: Math.round(paid || b.total), state: 'paid',
+      when: primaryWhen, method: b.paymentMethod, memo: null, live: null,
     });
   }
   if (split) {
     const balanceDue = b.balanceDueDate ? toKey(b.balanceDueDate) : null;
     const failed = !b.balancePaid && !!balanceDue && balanceDue < todayKey();
-    payments.push({
-      label: 'Balance',
-      amount: Math.round(b.balanceAmount ?? b.total / 2),
-      state: b.balancePaid ? 'paid' : failed ? 'failed' : 'scheduled',
-      when: balanceDue,
-      method: b.paymentMethod,
-      live: null,
-    });
+    // Show the outstanding balance; for a Square split already paid, show it too.
+    if (!b.balancePaid || manualRows.length === 0) {
+      payments.push({
+        label: 'Balance',
+        amount: Math.round(b.balanceAmount ?? b.total / 2),
+        state: b.balancePaid ? 'paid' : failed ? 'failed' : 'scheduled',
+        when: balanceDue, method: b.paymentMethod, memo: null, live: null,
+      });
+    }
   }
 
   const summary: PaymentSummary = {
@@ -190,12 +208,15 @@ export async function getBookingDetail(id: string): Promise<BookingDetail | null
 
   return {
     id: b.id,
+    reference: b.reference,
     currency: cur,
     propertyName: b.property.name,
     status: b.status,
     statusLabel: displayStatus(b).label,
     planLabel: planLabel(b.paymentPlan),
     banner: buildBanner(b, cur, { paid, remaining, split, lastBillAt: lastBill?.sentAt ?? null, paidWhen: primaryWhen }),
+    manualClaimApp: b.manualClaimApp ? appLabel(b.manualClaimApp) : null,
+    manualClaimAt: b.manualClaimAt ? b.manualClaimAt.toISOString() : null,
     guestName: `${b.client.firstName} ${b.client.lastName}`.trim(),
     firstName: b.client.firstName,
     email: b.client.email,
@@ -226,7 +247,7 @@ export async function getBookingDetail(id: string): Promise<BookingDetail | null
 
 // One sentence that answers "where does this stand" — same tone as the pill.
 function buildBanner(
-  b: { status: BookingStatus; total: number; depositAmount: number | null; balanceAmount: number | null; balanceDueDate: Date | null; balancePaid: boolean; createdAt: Date },
+  b: { status: BookingStatus; total: number; depositAmount: number | null; balanceAmount: number | null; balanceDueDate: Date | null; balancePaid: boolean; createdAt: Date; squareCardId: string | null },
   cur: string,
   ctx: { paid: number; remaining: number; split: boolean; lastBillAt: Date | null; paidWhen: string },
 ): Banner {
@@ -238,9 +259,12 @@ function buildBanner(
   if (b.status === 'PARTIALLY_PAID') {
     const bal = Math.round(b.balanceAmount ?? b.total / 2);
     const due = b.balanceDueDate ? toKey(b.balanceDueDate) : null;
+    const autoCharged = !!b.squareCardId;   // manual splits have no card → reminder, not auto-charge
     if (due && due < todayKey() && !b.balancePaid)
-      return { tone: 'plum', text: `Deposit paid — ${m(ctx.paid)} received · balance ${m(bal)} did not clear on ${bDay(due)}, retry needed.` };
-    return { tone: 'plum', text: `Deposit paid — ${m(ctx.paid)} received · balance ${m(bal)} auto-charges${due ? ` ${bDay(due)}` : ''}.` };
+      return { tone: 'plum', text: autoCharged
+        ? `Deposit paid — ${m(ctx.paid)} received · balance ${m(bal)} did not clear on ${bDay(due)}, retry needed.`
+        : `Deposit paid — ${m(ctx.paid)} received · balance ${m(bal)} due ${bDay(due)} (guest reminded to send transfer).` };
+    return { tone: 'plum', text: `Deposit paid — ${m(ctx.paid)} received · balance ${m(bal)} ${autoCharged ? 'auto-charges' : 'due'}${due ? ` ${bDay(due)}` : ''}.` };
   }
   if (b.status === 'APPROVED') {
     return { tone: 'sapphire', text: `Approved — awaiting payment${ctx.lastBillAt ? ` · link sent ${bDay(toKey(ctx.lastBillAt))}` : ''}.` };

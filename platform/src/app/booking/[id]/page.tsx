@@ -36,6 +36,7 @@ export default async function BookingStatusPage({ params }: { params: { id: stri
       <div className="tracker" style={{ boxShadow: 'var(--shadow)' }}>
         <div className={`badge ${badge.cls}`}>{badge.text}</div>
         <h3>{cancelled ? 'These dates aren’t available' : paid ? `You’re confirmed, ${b.client.firstName}!` : `Your request is in, ${b.client.firstName}.`}</h3>
+        <div className="fin-ref" style={{ marginTop: 2, marginBottom: 6 }}>Reservation <b>{b.reference}</b></div>
         <p className="note">
           {cancelled ? 'Reply to our email if your dates are flexible — we’ll help you find an open week.'
             : paid ? 'Your reservation is secured. Check your email for details.'

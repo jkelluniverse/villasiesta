@@ -11,7 +11,8 @@ import { CommsType } from '@prisma/client';
 
 const SPLIT_MIN_DAYS_OUT = 90;   // 50/50 split only when check-in is > 90 days away
 const BALANCE_LEAD_DAYS = 14;    // balance auto-charged at check-in − 14 days
-const CARD_MARKUP = 1.03;        // +3% service charge, applied at charge time (card only)
+const CARD_MARKUP = 1.03;        // +3% processing fee (card)
+const ACH_MARKUP = 1.01;         // +1% processing fee (bank transfer)
 
 export function splitEligible(checkInKey: string): boolean {
   return nightsBetween(todayKey(), checkInKey) > SPLIT_MIN_DAYS_OUT;
@@ -56,7 +57,8 @@ export async function finalizeBooking(input: FinalizeInput): Promise<FinalizeRes
   const balanceDueDate = useSplit ? addDays(ci, -BALANCE_LEAD_DAYS) : null;
 
   const isCard = input.method === 'card';
-  const chargeNow = money2(depositBase * (isCard ? CARD_MARKUP : 1));
+  // Processing fee by rail: card +3%, ACH +1% (manual apps never reach finalize).
+  const chargeNow = money2(depositBase * (isCard ? CARD_MARKUP : ACH_MARKUP));
   const cardFeeNow = money2(chargeNow - depositBase);
 
   // ---- Charge (deterministic idempotency keys: retries can never double-charge) ----
@@ -141,7 +143,7 @@ export async function finalizeBooking(input: FinalizeInput): Promise<FinalizeRes
   }
 
   const eb = {
-    id: booking.id, firstName: booking.client.firstName, lastName: booking.client.lastName,
+    id: booking.id, reference: booking.reference, firstName: booking.client.firstName, lastName: booking.client.lastName,
     checkIn: booking.checkIn, checkOut: booking.checkOut, nights: booking.nights, guests: booking.guests,
     total: money2(baseTotal + cardFeeNow),
     depositAmount: useSplit ? depositBase : null, balanceAmount: useSplit ? balanceBase : null,

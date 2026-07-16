@@ -6,6 +6,7 @@ import { assertRangeAvailable } from '@/lib/availability';
 import { parseKey } from '@/lib/dates';
 import { sendTemplate, notifyEmails } from '@/lib/email';
 import { requestReceived, ownerNewRequest } from '@/lib/emails';
+import { newUniqueReference } from '@/lib/reference';
 import { DEFAULT_SLUG } from '@/lib/property';
 
 export const dynamic = 'force-dynamic';
@@ -53,6 +54,7 @@ export async function POST(req: NextRequest) {
 
       return tx.booking.create({
         data: {
+          reference: await newUniqueReference(tx),
           propertyId: loaded.propertyId,
           clientId: client.id,
           checkIn: parseKey(input.checkIn),
@@ -86,11 +88,11 @@ export async function POST(req: NextRequest) {
 async function sendBookingEmails(
   input: z.infer<typeof BookingInput>,
   quote: { total: number; nights: number },
-  booking: { id: string; checkIn: Date; checkOut: Date; guests: number },
+  booking: { id: string; reference: string; checkIn: Date; checkOut: Date; guests: number },
 ) {
   const owners = notifyEmails();
   const b = {
-    id: booking.id, firstName: input.firstName, lastName: input.lastName, email: input.email,
+    id: booking.id, reference: booking.reference, firstName: input.firstName, lastName: input.lastName, email: input.email,
     phone: input.phone || undefined, message: input.message || undefined,
     checkIn: booking.checkIn, checkOut: booking.checkOut, nights: quote.nights, guests: booking.guests, total: quote.total,
   };

@@ -6,6 +6,7 @@ import { getBookingDetail, type PaymentRecord, type ActivityEntry } from '@/lib/
 import OwnerBar from '../../OwnerBar';
 import StatusPill from '../../StatusPill';
 import BookingActions from '../BookingActions';
+import RecordManualPayment from '../RecordManualPayment';
 
 export const dynamic = 'force-dynamic';
 
@@ -32,6 +33,7 @@ export default async function BookingDetailPage({ params }: { params: { id: stri
         <Link href="/owner/bookings" className="bd-back">← Bookings</Link>
         <div style={{ display: 'flex', alignItems: 'center', gap: 14, flexWrap: 'wrap' }}>
           <h1 style={{ margin: 0 }}>{b.guestName}</h1>
+          <span className="bd-ref num">{b.reference}</span>
           <StatusPill status={b.status} />
         </div>
         <div className="op-note num" style={{ marginTop: 4 }}>
@@ -40,6 +42,12 @@ export default async function BookingDetailPage({ params }: { params: { id: stri
 
         {/* status banner — one sentence: where does this stand */}
         <div className={`bd-banner ${b.banner.tone}`}>{b.banner.text}</div>
+
+        {b.manualClaimApp ? (
+          <div className="bd-banner topaz" style={{ marginTop: 10 }}>
+            Guest says they sent payment by {b.manualClaimApp}{b.manualClaimAt ? ` on ${niceDate(b.manualClaimAt)}` : ''} — verify receipt, then Record manual payment below.
+          </div>
+        ) : null}
 
         <div className="bd-grid">
           {/* left column */}
@@ -82,6 +90,19 @@ export default async function BookingDetailPage({ params }: { params: { id: stri
             <div className="bd-card">
               <h2>Actions</h2>
               <BookingActions id={b.id} status={b.status} isOwner={isOwner} />
+              {isOwner && b.status !== 'CANCELLED' && b.status !== 'EXPIRED' ? (
+                <div style={{ marginTop: 12, borderTop: '1px solid var(--hairline)', paddingTop: 12 }}>
+                  <RecordManualPayment
+                    bookingId={b.id}
+                    reference={b.reference}
+                    currency={cur}
+                    total={b.total}
+                    outstanding={b.summary.remaining || b.total}
+                    highlight={!!b.manualClaimApp}
+                    claimedApp={b.manualClaimApp}
+                  />
+                </div>
+              ) : null}
             </div>
 
             <div className="bd-card">
@@ -133,6 +154,9 @@ function PaymentBlock({ p, money }: { p: PaymentRecord; money: (n: number) => st
       ) : null}
       {p.live?.receiptUrl ? (
         <div className="row"><a href={p.live.receiptUrl} target="_blank" rel="noreferrer" style={{ color: 'var(--sapphire)', fontSize: '.82rem' }}>Square receipt ↗</a></div>
+      ) : null}
+      {p.memo ? (
+        <div className="row"><span className="muted">Memo</span><span className="muted" style={{ textAlign: 'right' }}>“{p.memo}”</span></div>
       ) : null}
     </div>
   );

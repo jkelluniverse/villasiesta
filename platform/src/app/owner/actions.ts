@@ -6,14 +6,15 @@ import { prisma } from '@/lib/db';
 import { assertRangeAvailable } from '@/lib/availability';
 import { addDays, parseKey, toKey } from '@/lib/dates';
 import { sendEmail, sendTemplate, notifyEmails } from '@/lib/email';
-import { approvedFinalize, declined } from '@/lib/emails';
+import { approvedFinalize, declined, paidConfirmation, depositReceipt, ownerPaymentAlert } from '@/lib/emails';
 import { toEmailBooking } from '@/lib/email-data';
 import { buildArrivalEmail, arrivalReady } from '@/lib/arrival';
+import { recordManualPayment } from '@/lib/manual';
 import { logComms } from '@/lib/comms';
 import { splitEligible } from '@/lib/finalize';
 import { createPaymentLink, toCents } from '@/lib/square';
 import { DEFAULT_SLUG } from '@/lib/property';
-import { BookingStatus, CommsType } from '@prisma/client';
+import { BookingStatus, CommsType, PaymentMethod } from '@prisma/client';
 
 const HOLD_HOURS = 48;
 const BALANCE_LEAD_DAYS = 14;
@@ -114,6 +115,47 @@ export async function declineBooking(bookingId: string): Promise<ActionResult> {
     await logComms(b.clientId, CommsType.EMAIL, 'declined');
     revalidatePath('/owner');
     revalidatePath('/owner/bookings');
+    return { ok: true };
+  } catch (e) {
+    return { ok: false, error: (e as Error).message };
+  }
+}
+
+export type RecordManualInput = {
+  bookingId: string; method: PaymentMethod; amount: number;
+  receivedAt: string; memo?: string; note?: string;
+};
+
+/** Owner records a received transfer-app payment; runs settlement + emails. */
+export async function recordManualPaymentAction(input: RecordManualInput): Promise<ActionResult> {
+  try {
+    const session = await requireOwner();
+    const recorder = await prisma.user.findUnique({ where: { email: (session.user?.email || '').toLowerCase() }, select: { id: true } });
+    const res = await recordManualPayment({
+      bookingId: input.bookingId, method: input.method, amount: input.amount,
+      receivedAt: parseKey(input.receivedAt), memo: input.memo, note: input.note,
+      recordedBy: recorder?.id || 'owner',
+    });
+    if (!res.ok) return { ok: false, error: res.error };
+
+    // Settlement emails mirror the Square path.
+    const b = await prisma.booking.findUnique({ where: { id: input.bookingId }, include: { client: true } });
+    if (b) {
+      const eb = toEmailBooking(b, b.client);
+      const owners = notifyEmails();
+      if (res.status === BookingStatus.PAID) {
+        await sendTemplate(b.client.email, paidConfirmation(eb), owners[0]);
+        await logComms(b.clientId, CommsType.EMAIL, 'paid-confirmation (manual)');
+        if (owners.length) await sendTemplate(owners, ownerPaymentAlert({ ...eb, lastName: b.client.lastName }, 'full'), b.client.email);
+      } else if (res.status === BookingStatus.PARTIALLY_PAID) {
+        await sendTemplate(b.client.email, depositReceipt(eb), owners[0]);
+        await logComms(b.clientId, CommsType.EMAIL, 'deposit-receipt (manual)');
+        if (owners.length) await sendTemplate(owners, ownerPaymentAlert({ ...eb, lastName: b.client.lastName }, 'deposit'), b.client.email);
+      }
+    }
+    revalidatePath('/owner');
+    revalidatePath('/owner/bookings');
+    revalidatePath(`/owner/bookings/${input.bookingId}`);
     return { ok: true };
   } catch (e) {
     return { ok: false, error: (e as Error).message };

@@ -4,6 +4,7 @@ import type { Booking, Client } from '@prisma/client';
 export function toEmailBooking(b: Booking, c: Client) {
   return {
     id: b.id,
+    reference: b.reference,
     firstName: c.firstName,
     lastName: c.lastName,
     email: c.email,

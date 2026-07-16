@@ -154,6 +154,7 @@ enum PaymentPlan {
 
 model Booking {
   id             String         @id @default(cuid())
+  reference      String         @unique   // public booking name, e.g. "VS-7K3M" (memo-safe)
   propertyId     String
   clientId       String
   checkIn        DateTime       @db.Date
@@ -174,6 +175,9 @@ model Booking {
   balanceDueDate DateTime?      // check-in − 14 days
   balancePaid    Boolean        @default(false)
   arrivalSent    Boolean        @default(false)   // arrival email sent (one-click or auto)
+  // Manual transfer-app claim (guest pressed "I've sent it" — not yet verified)
+  manualClaimApp PaymentMethod?
+  manualClaimAt  DateTime?
   // Square references
   squarePaymentId   String?   // payment id of the deposit/full payment
   squareCustomerId  String?   // Customers API id
@@ -187,9 +191,28 @@ model Booking {
   property Property @relation(fields: [propertyId], references: [id])
   client   Client   @relation(fields: [clientId], references: [id])
   block    CalendarBlock?
+  manualPayments ManualPayment[]
 
   @@index([propertyId, status])
   @@index([checkIn, checkOut])
+}
+
+// ---------- Manual transfer-app payments (Cash App / Venmo / Zelle / Chime) ----------
+// Money arrives outside our system; the owner records each receipt here. This is
+// the paper trail — a booking is only PAID once the owner records enough of these.
+model ManualPayment {
+  id         String        @id @default(cuid())
+  bookingId  String
+  method     PaymentMethod
+  amount     Float
+  receivedAt DateTime
+  memo       String?       // pasted exactly as the app shows it
+  note       String?
+  recordedBy String        // User id of the owner who recorded it
+  createdAt  DateTime      @default(now())
+  booking    Booking       @relation(fields: [bookingId], references: [id], onDelete: Cascade)
+
+  @@index([bookingId])
 }
 
 // ---------- Calendar blocks (owner blocks, Airbnb-synced, and booking holds) ----------

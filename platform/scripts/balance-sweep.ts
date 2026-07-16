@@ -32,9 +32,33 @@ async function main() {
   for (const b of due) {
     const ci = toKey(b.checkIn);
     const balance = b.balanceAmount ?? 0;
-    if (!balance || !b.squareCardId || !b.squareCustomerId) {
-      console.error(`[sweep] ${b.id}: missing balance/card/customer — flagging owner`);
-      await alertOwner(b.id, 'Missing card on file or balance amount — collect manually.');
+    if (!balance) {
+      console.error(`[sweep] ${b.id}: no balance amount — flagging owner`);
+      await alertOwner(b.id, 'Missing balance amount — collect manually.');
+      continue;
+    }
+    // Manual split (no card on file): can't auto-charge — remind the guest to
+    // send the transfer with the same memo. Once, guarded by CommsLog.
+    if (!b.squareCardId || !b.squareCustomerId) {
+      const already = await prisma.commsLog.findFirst({
+        where: { clientId: b.clientId, type: CommsType.EMAIL, detail: 'manual-balance-reminder', sentAt: b.balanceDueDate ? { gte: b.balanceDueDate } : undefined },
+      });
+      if (!already) {
+        await sendEmail({
+          to: b.client.email, replyTo: notifyEmails()[0],
+          subject: `Balance due — Villa Siesta ${b.reference}`,
+          text: [
+            `Hi ${b.client.firstName},`, '',
+            `The remaining balance of ${b.property.currency}${balance.toLocaleString()} for your stay ${ci} → ${toKey(b.checkOut)} is now due.`,
+            `Please send it the same way you sent your deposit, and include this in the memo:`,
+            `  Villa Siesta ${b.reference} — ${b.client.lastName}`, '',
+            `We'll confirm as soon as it arrives.`, '', '— Villa Siesta',
+          ].join('\n'),
+        });
+        await logComms(b.clientId, CommsType.EMAIL, 'manual-balance-reminder');
+        await alertOwner(b.id, `Manual balance ${b.property.currency}${balance.toLocaleString()} due (${b.reference}) — guest reminded to send the transfer.`);
+        console.log(`[sweep] ${b.id}: manual balance reminder sent`);
+      }
       continue;
     }
 
