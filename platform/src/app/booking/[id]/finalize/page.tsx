@@ -49,7 +49,7 @@ export default async function FinalizePage({ params }: { params: { id: string } 
                 <div className="r" key={k}><span>{l.label.replace(/^(\d)/, (m0) => cur + m0)}</span><span className="tnum">{cur}{Math.round(l.amount).toLocaleString()}</span></div>
               ))}
               <div className="r total"><span>Total (transfer app · no fee)</span><b className="tnum">{cur}{baseTotal.toLocaleString()}</b></div>
-              <div className="r hint">Processing fees, disclosed here and on your receipt: bank transfer +{ACH_PCT}% ({cur}{achTotal.toLocaleString()}), card +{cardPct}% ({cur}{cardTotal.toLocaleString()}). Cash App / Venmo / Zelle / Chime have no fee.</div>
+              <div className="r hint">Processing fees, disclosed here and on your receipt: bank transfer +{ACH_PCT}% ({cur}{achTotal.toLocaleString()}), card +{cardPct}% ({cur}{cardTotal.toLocaleString()}). Zelle has no fee.</div>
             </div>
           ) : null}
         </aside>

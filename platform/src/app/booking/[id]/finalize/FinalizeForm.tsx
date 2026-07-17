@@ -1,12 +1,12 @@
 'use client';
 import { useEffect, useRef, useState } from 'react';
 
-type Method = 'ach' | 'card' | 'zelle' | 'cashapp' | 'venmo' | 'chime';
-const MANUAL: Method[] = ['zelle', 'cashapp', 'venmo', 'chime'];
+type Method = 'ach' | 'card' | 'zelle';
+const MANUAL: Method[] = ['zelle'];
 const money = (c: string, n: number) => c + Math.round(n).toLocaleString();
 
 // method (lowercase UI) -> PaymentMethod enum
-const ENUM: Record<string, string> = { zelle: 'ZELLE', cashapp: 'CASHAPP', venmo: 'VENMO', chime: 'CHIME' };
+const ENUM: Record<string, string> = { zelle: 'ZELLE' };
 
 type TransferApp = { key: string; label: string; handle: string; sub?: string };
 
@@ -166,7 +166,7 @@ export default function FinalizeForm(props: {
     }
   }
 
-  const methodLabel: Record<Method, string> = { ach: 'Bank transfer (ACH)', card: 'Credit / Debit card', zelle: 'Zelle', cashapp: 'Cash App', venmo: 'Venmo', chime: 'Chime' };
+  const methodLabel: Record<Method, string> = { ach: 'Bank transfer (ACH)', card: 'Credit / Debit card', zelle: 'Zelle' };
 
   if (claimed) {
     return (

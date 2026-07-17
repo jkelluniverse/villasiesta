@@ -4,10 +4,7 @@ import { useRouter } from 'next/navigation';
 import { recordManualPaymentAction } from '../actions';
 
 const METHODS = [
-  { value: 'CASHAPP', label: 'Cash App' },
-  { value: 'VENMO', label: 'Venmo' },
   { value: 'ZELLE', label: 'Zelle' },
-  { value: 'CHIME', label: 'Chime' },
 ] as const;
 
 const todayKey = () => new Date().toISOString().slice(0, 10);
@@ -21,7 +18,7 @@ export default function RecordManualPayment(props: {
   const [pending, start] = useTransition();
   const [err, setErr] = useState('');
 
-  const [method, setMethod] = useState<string>('CASHAPP');
+  const [method, setMethod] = useState<string>('ZELLE');
   const [amount, setAmount] = useState<string>(String(Math.round(props.outstanding)));
   const [receivedAt, setReceivedAt] = useState<string>(todayKey());
   const [memo, setMemo] = useState('');

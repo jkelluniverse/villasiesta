@@ -11,7 +11,7 @@ import { CommsType, PaymentMethod } from '@prisma/client';
 export const dynamic = 'force-dynamic';
 
 const Input = z.object({
-  method: z.enum(['ZELLE', 'CASHAPP', 'VENMO', 'CHIME']),
+  method: z.enum(['ZELLE']),
   amount: z.coerce.number().positive(),
 });
 

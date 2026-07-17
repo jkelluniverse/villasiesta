@@ -4,10 +4,7 @@ import { parseKey, toKey, addDays } from './dates';
 import { logComms } from './comms';
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Transfer-app destinations. ⚠️ OWNER MUST VERIFY these exact strings before
-// deploy — a single wrong character sends a guest's money to a stranger. These
-// were read from an image ($ikellnch vs $jkellnch? Venmo casing?). Overridable
-// by env so they can be corrected without a code change.
+// Transfer-app destinations. Zelle only — routed by the owner's name + phone.
 // ─────────────────────────────────────────────────────────────────────────────
 export const HOST_NAME = process.env.HOST_NAME || 'Jacob Kell';
 export const HOST_PHONE = process.env.HOST_PHONE || '330-495-7821';
@@ -15,13 +12,10 @@ export const HOST_PHONE = process.env.HOST_PHONE || '330-495-7821';
 export type TransferApp = { key: Extract<PaymentMethod, 'CASHAPP' | 'VENMO' | 'ZELLE' | 'CHIME'>; label: string; handle: string; sub?: string };
 
 export const TRANSFER_APPS: TransferApp[] = [
-  { key: 'CASHAPP', label: 'Cash App', handle: process.env.CASHAPP_TAG || '$ikellnch' },
-  { key: 'VENMO',   label: 'Venmo',    handle: process.env.VENMO_TAG || '@Jacobnch' },
-  { key: 'ZELLE',   label: 'Zelle',    handle: HOST_NAME, sub: HOST_PHONE },
-  { key: 'CHIME',   label: 'Chime',    handle: HOST_NAME, sub: HOST_PHONE },
+  { key: 'ZELLE', label: 'Zelle', handle: HOST_NAME, sub: HOST_PHONE },
 ];
 
-export const MANUAL_METHODS: PaymentMethod[] = ['CASHAPP', 'VENMO', 'ZELLE', 'CHIME'];
+export const MANUAL_METHODS: PaymentMethod[] = ['ZELLE'];
 export function isManualMethod(m: PaymentMethod | null | undefined): boolean {
   return !!m && MANUAL_METHODS.includes(m);
 }
