@@ -13,8 +13,8 @@ import { recordManualPayment } from '@/lib/manual';
 import { logComms } from '@/lib/comms';
 import { splitEligible } from '@/lib/finalize';
 import { createPaymentLink, toCents } from '@/lib/square';
-import { DEFAULT_SLUG } from '@/lib/property';
-import { BookingStatus, CommsType, PaymentMethod } from '@prisma/client';
+import { DEFAULT_SLUG, getPropertyId } from '@/lib/property';
+import { BlockSource, BookingStatus, CommsType, PaymentMethod } from '@prisma/client';
 
 const HOLD_HOURS = 48;
 const BALANCE_LEAD_DAYS = 14;
@@ -227,6 +227,72 @@ export async function sendArrivalEmail(bookingId: string): Promise<ActionResult>
     await prisma.booking.update({ where: { id: bookingId }, data: { arrivalSent: true } });
     await logComms(b.clientId, CommsType.EMAIL, 'arrival-info');
     revalidatePath(`/owner/bookings/${bookingId}`);
+    return { ok: true };
+  } catch (e) {
+    return { ok: false, error: (e as Error).message };
+  }
+}
+
+/** Save the Airbnb iCal export URL (Settings). Empty string disables sync. */
+export async function saveAirbnbIcal(url: string): Promise<ActionResult> {
+  try {
+    await requireOwner();
+    const trimmed = url.trim();
+    if (trimmed && !/^https?:\/\//i.test(trimmed)) return { ok: false, error: 'Enter the full https:// iCal export link from Airbnb.' };
+    await prisma.property.update({ where: { slug: DEFAULT_SLUG }, data: { airbnbIcalUrl: trimmed || null } });
+    revalidatePath('/owner/settings');
+    revalidatePath('/owner/calendar');
+    return { ok: true };
+  } catch (e) {
+    return { ok: false, error: (e as Error).message };
+  }
+}
+
+/** Owner blocks [start, end) on the calendar (personal use, maintenance...). */
+export async function blockDates(startKey: string, endKey: string, note?: string): Promise<ActionResult> {
+  try {
+    await requireOwner();
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(startKey) || !/^\d{4}-\d{2}-\d{2}$/.test(endKey) || startKey >= endKey)
+      return { ok: false, error: 'Pick a valid date range.' };
+    const propertyId = await getPropertyId(DEFAULT_SLUG);
+    if (!propertyId) return { ok: false, error: 'property_not_found' };
+
+    await prisma.$transaction(async (tx) => {
+      // Blocks may not cover a live booking's nights (guests already hold them).
+      const clash = await tx.booking.findFirst({
+        where: {
+          propertyId,
+          checkIn: { lt: parseKey(endKey) },
+          checkOut: { gt: parseKey(startKey) },
+          OR: [
+            { status: BookingStatus.PAID },
+            { status: BookingStatus.PARTIALLY_PAID },
+            { status: BookingStatus.APPROVED, OR: [{ holdExpiresAt: null }, { holdExpiresAt: { gt: new Date() } }] },
+          ],
+        },
+        select: { reference: true },
+      });
+      if (clash) throw new Error(`Those dates include booking ${clash.reference} — cancel it first.`);
+      await tx.calendarBlock.create({
+        data: { propertyId, startDate: parseKey(startKey), endDate: parseKey(endKey), source: BlockSource.OWNER, summary: note?.trim() || 'Blocked by owner' },
+      });
+    });
+    revalidatePath('/owner/calendar');
+    return { ok: true };
+  } catch (e) {
+    return { ok: false, error: (e as Error).message };
+  }
+}
+
+/** Remove an owner block. Airbnb blocks are sync-managed; bookings need Cancel. */
+export async function unblockDates(blockId: string): Promise<ActionResult> {
+  try {
+    await requireOwner();
+    const block = await prisma.calendarBlock.findUnique({ where: { id: blockId } });
+    if (!block) return { ok: false, error: 'not_found' };
+    if (block.source !== BlockSource.OWNER) return { ok: false, error: 'Only owner blocks can be removed here.' };
+    await prisma.calendarBlock.delete({ where: { id: blockId } });
+    revalidatePath('/owner/calendar');
     return { ok: true };
   } catch (e) {
     return { ok: false, error: (e as Error).message };

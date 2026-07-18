@@ -5,6 +5,7 @@ import { prisma } from '@/lib/db';
 import { DEFAULT_SLUG } from '@/lib/property';
 import OwnerBar from '../OwnerBar';
 import ArrivalEditor from './ArrivalEditor';
+import AirbnbSyncEditor from './AirbnbSyncEditor';
 
 export const dynamic = 'force-dynamic';
 
@@ -18,7 +19,7 @@ export default async function SettingsPage() {
     select: {
       address: true, doorCode: true, wifiName: true, wifiPassword: true,
       parkingNotes: true, arrivalNotes: true, houseRules: true, autoArrival: true,
-      checkinTime: true, checkoutTime: true,
+      checkinTime: true, checkoutTime: true, airbnbIcalUrl: true,
     },
   });
 
@@ -44,6 +45,15 @@ export default async function SettingsPage() {
             />
           ) : (
             <div className="op-note">Read-only access — only the owner can edit arrival info.</div>
+          )}
+        </div>
+
+        <div className="bd-card" style={{ maxWidth: 640, marginTop: 20 }}>
+          <h2>Airbnb calendar sync</h2>
+          {isOwner ? (
+            <AirbnbSyncEditor initial={p?.airbnbIcalUrl ?? ''} />
+          ) : (
+            <div className="op-note">Read-only access — only the owner can edit the sync link.</div>
           )}
         </div>
       </div>

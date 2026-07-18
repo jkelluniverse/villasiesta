@@ -11,6 +11,7 @@
     "db:seed": "tsx prisma/seed.ts",
     "sweep": "tsx scripts/balance-sweep.ts",
     "arrival-sweep": "tsx scripts/arrival-sweep.ts",
+    "calendar-sweep": "tsx scripts/calendar-sweep.ts",
     "email:test": "tsx scripts/email-test.ts",
     "lint": "next lint",
     "typecheck": "tsc --noEmit"
