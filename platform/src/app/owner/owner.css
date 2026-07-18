@@ -206,4 +206,26 @@
 .cal-sync{font-size:.78rem;color:var(--ink3)}
 .cal-sync .ok{color:var(--jade)}
 .cal-sync .bad{color:var(--garnet)}
+
+/* ledger */
+.lg-card{padding:0;overflow:hidden}
+.lg-month{display:flex;align-items:center;gap:12px;padding:18px 22px 12px}
+.lg-month h2{font-size:1rem;font-weight:600}
+.lg-scroll{overflow-x:auto}
+.lg-table{width:100%;border-collapse:collapse;font-size:.86rem}
+.lg-table th{font-size:.66rem;font-weight:600;letter-spacing:.08em;text-transform:uppercase;color:var(--ink3);text-align:right;padding:8px 12px;border-bottom:1px solid var(--hairline);white-space:nowrap}
+.lg-table th.t{text-align:left}
+.lg-table td{padding:11px 12px;border-bottom:1px solid var(--hairline);text-align:right;white-space:nowrap}
+.lg-table td.t{text-align:left}
+.lg-table td.dim{color:var(--ink3)}
+.lg-table td.net{font-weight:700}
+.lg-table tr:hover td{background:var(--surface2)}
+.lg-table tr.total td{font-weight:600;background:var(--surface2);border-bottom:0}
+.lg-table tr.total td.net{color:var(--jade)}
+.lg-table th:first-child,.lg-table td:first-child{padding-left:22px}
+.lg-table th:last-child,.lg-table td:last-child{padding-right:22px}
+.lg-guest{color:var(--ink);text-decoration:none;font-weight:600}
+.lg-guest:hover{color:var(--brand)}
+.lg-guest small{display:block;color:var(--ink3);font-weight:500;font-size:.72rem;letter-spacing:.04em}
+.lg-table .pill{font-size:.66rem;padding:3px 9px}
 @media(max-width:640px){.cal-day{min-height:48px}.cal-tag{display:none}.cal-rate{display:none}}
