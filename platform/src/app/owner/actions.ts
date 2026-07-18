@@ -11,6 +11,7 @@ import { toEmailBooking } from '@/lib/email-data';
 import { buildArrivalEmail, arrivalReady } from '@/lib/arrival';
 import { recordManualPayment } from '@/lib/manual';
 import { decryptBankDetails } from '@/lib/ach';
+import { applyCustomRate } from '@/lib/pricing-rules';
 import { logComms } from '@/lib/comms';
 import { splitEligible } from '@/lib/finalize';
 import { createPaymentLink, toCents } from '@/lib/square';
@@ -322,6 +323,41 @@ export async function sendArrivalEmail(bookingId: string): Promise<ActionResult>
     await prisma.booking.update({ where: { id: bookingId }, data: { arrivalSent: true } });
     await logComms(b.clientId, CommsType.EMAIL, 'arrival-info');
     revalidatePath(`/owner/bookings/${bookingId}`);
+    return { ok: true };
+  } catch (e) {
+    return { ok: false, error: (e as Error).message };
+  }
+}
+
+/** Set a custom nightly price on [start, end) from the calendar. Flows straight
+ * into guest quotes (quote-core prefers CUSTOM over seasonal). */
+export async function setNightlyRate(startKey: string, endKey: string, price: number): Promise<ActionResult> {
+  try {
+    await requireOwner();
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(startKey) || !/^\d{4}-\d{2}-\d{2}$/.test(endKey) || startKey >= endKey)
+      return { ok: false, error: 'Pick a valid date range.' };
+    if (!Number.isFinite(price) || price < 50 || price > 10000)
+      return { ok: false, error: 'Enter a nightly price between 50 and 10,000.' };
+    const propertyId = await getPropertyId(DEFAULT_SLUG);
+    if (!propertyId) return { ok: false, error: 'property_not_found' };
+    await applyCustomRate(propertyId, startKey, endKey, price);
+    revalidatePath('/owner/calendar');
+    return { ok: true };
+  } catch (e) {
+    return { ok: false, error: (e as Error).message };
+  }
+}
+
+/** Remove custom overrides on [start, end) — nights fall back to seasonal rates. */
+export async function clearNightlyRate(startKey: string, endKey: string): Promise<ActionResult> {
+  try {
+    await requireOwner();
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(startKey) || !/^\d{4}-\d{2}-\d{2}$/.test(endKey) || startKey >= endKey)
+      return { ok: false, error: 'Pick a valid date range.' };
+    const propertyId = await getPropertyId(DEFAULT_SLUG);
+    if (!propertyId) return { ok: false, error: 'property_not_found' };
+    await applyCustomRate(propertyId, startKey, endKey, null);
+    revalidatePath('/owner/calendar');
     return { ok: true };
   } catch (e) {
     return { ok: false, error: (e as Error).message };

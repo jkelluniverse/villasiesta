@@ -52,7 +52,10 @@ export default async function SettingsPage() {
         <div className="bd-card" style={{ maxWidth: 640, marginTop: 20 }}>
           <h2>Airbnb calendar sync</h2>
           {isOwner ? (
-            <AirbnbSyncEditor initial={p?.airbnbIcalUrl ?? ''} />
+            <AirbnbSyncEditor
+              initial={p?.airbnbIcalUrl ?? ''}
+              exportUrl={`${process.env.APP_URL || 'https://villasiestasarasota.com'}/api/ical${process.env.ICAL_EXPORT_TOKEN ? `?token=${process.env.ICAL_EXPORT_TOKEN}` : ''}`}
+            />
           ) : (
             <div className="op-note">Read-only access — only the owner can edit the sync link.</div>
           )}

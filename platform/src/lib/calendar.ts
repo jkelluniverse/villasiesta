@@ -1,6 +1,7 @@
 import { prisma } from './db';
 import { BlockSource, BookingStatus } from '@prisma/client';
 import { displayStatus } from './bookingStatus';
+import { loadPropertyPricing, nightlyRate } from './pricing';
 import { addDays, eachNight, parseKey, toKey, todayKey } from './dates';
 
 export type DayOcc = 'open' | 'booking' | 'owner' | 'airbnb';
@@ -12,6 +13,8 @@ export type DayCell = {
   today: boolean;
   occ: DayOcc;
   isStart: boolean;     // first night of the segment (where the label sits)
+  rate?: number;        // nightly rate (open, in-month days)
+  customRate?: boolean; // rate comes from a CUSTOM override, not seasonal
   bookingId?: string;
   reference?: string;
   guest?: string;
@@ -19,6 +22,8 @@ export type DayCell = {
   blockId?: string;
   label?: string;       // block summary
 };
+
+export type SyncStatus = { configured: boolean; status?: string; message?: string | null; ranAt?: string };
 
 export type CalendarMonth = {
   monthKey: string;     // yyyy-mm
@@ -29,6 +34,7 @@ export type CalendarMonth = {
   weeks: DayCell[][];
   currency: string;
   counts: { booked: number; blocked: number; open: number };
+  sync: SyncStatus;
 };
 
 const monthKeyOf = (d: Date) => `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, '0')}`;
@@ -42,8 +48,10 @@ function normalizeMonth(monthKey: string): { year: number; month0: number } {
 }
 
 export async function getCalendarMonth(slug: string, monthKey: string): Promise<CalendarMonth | null> {
-  const property = await prisma.property.findUnique({ where: { slug }, select: { id: true, currency: true } });
+  const property = await prisma.property.findUnique({ where: { slug }, select: { id: true, currency: true, airbnbIcalUrl: true } });
   if (!property) return null;
+  const loaded = await loadPropertyPricing(slug);
+  const pricing = loaded?.pricing;
 
   const { year, month0 } = normalizeMonth(monthKey);
   const firstOfMonth = new Date(Date.UTC(year, month0, 1));
@@ -116,9 +124,14 @@ export async function getCalendarMonth(slug: string, monthKey: string): Promise<
     const [, , dd] = k.split('-');
     const inMonth = k.slice(0, 7) === key;
     const hit = map.get(k);
-    const cell: DayCell = hit
+    let cell: DayCell = hit
       ? { ...hit, day: Number(dd), inMonth, today: k === today }
       : { key: k, day: Number(dd), inMonth, today: k === today, occ: 'open', isStart: false };
+    if (cell.occ === 'open' && inMonth && pricing) {
+      const rate = nightlyRate(k, pricing.seasonal, pricing.custom);
+      const custom = pricing.custom.some((c) => c.type === 'CUSTOM' && k >= c.start && k < c.end);
+      cell = { ...cell, rate, customRate: custom };
+    }
     if (inMonth) {
       if (cell.occ === 'booking') counts.booked++;
       else if (cell.occ === 'open') counts.open++;
@@ -130,6 +143,13 @@ export async function getCalendarMonth(slug: string, monthKey: string): Promise<
   const weeks: DayCell[][] = [];
   for (let i = 0; i < cells.length; i += 7) weeks.push(cells.slice(i, i + 7));
 
+  const lastSync = property.airbnbIcalUrl
+    ? await prisma.syncLog.findFirst({ where: { propertyId: property.id }, orderBy: { ranAt: 'desc' } })
+    : null;
+  const sync: SyncStatus = property.airbnbIcalUrl
+    ? { configured: true, status: lastSync?.status ?? 'pending', message: lastSync?.message, ranAt: lastSync?.ranAt.toISOString() }
+    : { configured: false };
+
   return {
     monthKey: key,
     monthLabel: firstOfMonth.toLocaleString('en-US', { month: 'long', year: 'numeric', timeZone: 'UTC' }),
@@ -139,5 +159,6 @@ export async function getCalendarMonth(slug: string, monthKey: string): Promise<
     weeks,
     currency: property.currency,
     counts,
+    sync,
   };
 }

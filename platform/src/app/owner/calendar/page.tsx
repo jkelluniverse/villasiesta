@@ -9,6 +9,15 @@ import CalendarGrid from './CalendarGrid';
 
 export const dynamic = 'force-dynamic';
 
+function timeAgo(iso: string): string {
+  const mins = Math.round((Date.now() - new Date(iso).getTime()) / 60000);
+  if (mins < 2) return 'just now';
+  if (mins < 60) return `${mins}m ago`;
+  const hrs = Math.round(mins / 60);
+  if (hrs < 48) return `${hrs}h ago`;
+  return `${Math.round(hrs / 24)}d ago`;
+}
+
 export default async function CalendarPage({ searchParams }: { searchParams: { m?: string } }) {
   const session = await getServerSession(authOptions);
   if (!session?.user) redirect('/owner/login');
@@ -30,6 +39,17 @@ export default async function CalendarPage({ searchParams }: { searchParams: { m
             <Link className="op-view" href="/owner/calendar" style={{ marginLeft: 4 }}>Today</Link>
           </div>
           <div className="op-note num">{cal.counts.booked} booked · {cal.counts.blocked} blocked · {cal.counts.open} open</div>
+          <div className="cal-sync">
+            {cal.sync.configured ? (
+              cal.sync.status === 'healthy'
+                ? <>Airbnb import: <span className="ok">healthy</span>{cal.sync.ranAt ? ` · ${timeAgo(cal.sync.ranAt)}` : ''}</>
+                : cal.sync.status === 'error'
+                  ? <>Airbnb import: <span className="bad">error</span> — {cal.sync.message || 'see logs'}</>
+                  : <>Airbnb import: waiting for first sync</>
+            ) : (
+              <>Airbnb sync not connected — <Link href="/owner/settings" style={{ color: 'var(--sapphire)' }}>set up in Settings</Link></>
+            )}
+          </div>
         </div>
 
         <div className="op-card" style={{ marginTop: 18 }}>

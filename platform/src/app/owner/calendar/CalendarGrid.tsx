@@ -1,7 +1,7 @@
 'use client';
 import { useMemo, useState, useTransition } from 'react';
 import { useRouter } from 'next/navigation';
-import { blockDates, unblockDates } from '../actions';
+import { blockDates, unblockDates, setNightlyRate, clearNightlyRate } from '../actions';
 import type { CalendarMonth, DayCell } from '@/lib/calendar';
 
 const addDays = (key: string, n: number) => {
@@ -16,6 +16,8 @@ export default function CalendarGrid({ cal, isOwner }: { cal: CalendarMonth; isO
   const [sel, setSel] = useState<{ a: string; b: string } | null>(null);
   const [dragging, setDragging] = useState(false);
   const [note, setNote] = useState('');
+  const [price, setPrice] = useState('');
+  const [mode, setMode] = useState<'block' | 'price'>('price');
   const [err, setErr] = useState('');
   const [confirmBlock, setConfirmBlock] = useState<DayCell | null>(null);
 
@@ -50,6 +52,28 @@ export default function CalendarGrid({ cal, isOwner }: { cal: CalendarMonth; isO
       const res = await blockDates(range.start, range.end, note);
       if (res.ok) { setSel(null); setNote(''); router.refresh(); }
       else setErr(res.error || 'Could not block those dates.');
+    });
+  };
+
+  const applyPrice = () => {
+    if (!range) return;
+    const p = parseFloat(price);
+    if (!p) { setErr('Enter a nightly price.'); return; }
+    setErr('');
+    start(async () => {
+      const res = await setNightlyRate(range.start, range.end, p);
+      if (res.ok) { setSel(null); setPrice(''); router.refresh(); }
+      else setErr(res.error || 'Could not set the price.');
+    });
+  };
+
+  const applyClearPrice = () => {
+    if (!range) return;
+    setErr('');
+    start(async () => {
+      const res = await clearNightlyRate(range.start, range.end);
+      if (res.ok) { setSel(null); setPrice(''); router.refresh(); }
+      else setErr(res.error || 'Could not reset those nights.');
     });
   };
 
@@ -92,6 +116,7 @@ export default function CalendarGrid({ cal, isOwner }: { cal: CalendarMonth; isO
             <span className="num d">{c.day}</span>
             {c.isStart && c.occ === 'booking' ? <span className="cal-tag">{c.reference}</span> : null}
             {c.isStart && c.occ !== 'booking' && c.occ !== 'open' ? <span className="cal-tag">{c.occ === 'airbnb' ? 'Airbnb' : 'Blocked'}</span> : null}
+            {c.occ === 'open' && c.inMonth && c.rate ? <span className={`cal-rate num${c.customRate ? ' custom' : ''}`}>${c.rate}</span> : null}
           </div>
         ))}
       </div>
@@ -100,27 +125,45 @@ export default function CalendarGrid({ cal, isOwner }: { cal: CalendarMonth; isO
         <span><i className="lg booking" /> Booked (click to open)</span>
         <span><i className="lg owner" /> Owner block (click to remove)</span>
         <span><i className="lg airbnb" /> Airbnb</span>
-        <span><i className="lg open" /> Open{isOwner ? ' (drag to block)' : ''}</span>
+        <span><i className="lg open" /> Open{isOwner ? ' (drag to price or block)' : ''}</span>
+        <span><b style={{ color: 'var(--plum)' }}>$—</b> custom price</span>
       </div>
 
       {err ? <div className="op-note" style={{ color: 'var(--garnet)', marginTop: 10 }}>{err}</div> : null}
 
       {isOwner && range ? (
-        <div className="cal-bar">
-          <div>
+        <div className="cal-bar" style={{ flexDirection: 'column', alignItems: 'stretch', gap: 10 }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
             <b className="num">{range.start} → {range.end}</b>
-            <span className="op-note" style={{ marginLeft: 8 }}>{nights} night{nights === 1 ? '' : 's'}</span>
+            <span className="op-note">{nights} night{nights === 1 ? '' : 's'}</span>
+            <div className="cal-modes">
+              <button type="button" className={`cal-mode${mode === 'price' ? ' on' : ''}`} onClick={() => setMode('price')}>Price</button>
+              <button type="button" className={`cal-mode${mode === 'block' ? ' on' : ''}`} onClick={() => setMode('block')}>Block</button>
+            </div>
           </div>
-          <input
-            className="cal-note"
-            placeholder="Note (optional) — e.g. family visit"
-            value={note}
-            onChange={(e) => setNote(e.target.value)}
-          />
-          <div style={{ display: 'flex', gap: 8 }}>
-            <button className="op-btn op-btn-primary" disabled={pending} onClick={applyBlock}>{pending ? '…' : 'Block dates'}</button>
-            <button className="op-btn op-btn-ghost" disabled={pending} onClick={() => { setSel(null); setNote(''); }}>Cancel</button>
-          </div>
+          {mode === 'price' ? (
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+              <input
+                className="cal-note" style={{ maxWidth: 160, flex: 'none' }}
+                inputMode="numeric" placeholder="Nightly price ($)"
+                value={price} onChange={(e) => setPrice(e.target.value.replace(/[^0-9]/g, ''))}
+              />
+              <button className="op-btn op-btn-primary" disabled={pending} onClick={applyPrice}>{pending ? '…' : 'Set price'}</button>
+              <button className="op-btn op-btn-ghost" disabled={pending} onClick={applyClearPrice} title="Remove custom prices — nights fall back to seasonal rates">Reset to seasonal</button>
+              <button className="op-btn op-btn-ghost" disabled={pending} onClick={() => { setSel(null); setPrice(''); }}>Cancel</button>
+            </div>
+          ) : (
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+              <input
+                className="cal-note"
+                placeholder="Note (optional) — e.g. family visit"
+                value={note}
+                onChange={(e) => setNote(e.target.value)}
+              />
+              <button className="op-btn op-btn-primary" disabled={pending} onClick={applyBlock}>{pending ? '…' : 'Block dates'}</button>
+              <button className="op-btn op-btn-ghost" disabled={pending} onClick={() => { setSel(null); setNote(''); }}>Cancel</button>
+            </div>
+          )}
         </div>
       ) : null}
 
