@@ -5,20 +5,21 @@ import { recordManualPaymentAction } from '../actions';
 
 const METHODS = [
   { value: 'ZELLE', label: 'Zelle' },
+  { value: 'ACH_DIRECT', label: 'Bank debit (ACH)' },
 ] as const;
 
 const todayKey = () => new Date().toISOString().slice(0, 10);
 
 export default function RecordManualPayment(props: {
   bookingId: string; reference: string; currency: string; total: number; outstanding: number;
-  highlight: boolean; claimedApp: string | null;
+  highlight: boolean; claimedApp: string | null; defaultMethod?: string;
 }) {
   const router = useRouter();
   const [open, setOpen] = useState(false);
   const [pending, start] = useTransition();
   const [err, setErr] = useState('');
 
-  const [method, setMethod] = useState<string>('ZELLE');
+  const [method, setMethod] = useState<string>(props.defaultMethod || 'ZELLE');
   const [amount, setAmount] = useState<string>(String(Math.round(props.outstanding)));
   const [receivedAt, setReceivedAt] = useState<string>(todayKey());
   const [memo, setMemo] = useState('');

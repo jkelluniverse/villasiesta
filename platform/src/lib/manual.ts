@@ -19,8 +19,13 @@ export const MANUAL_METHODS: PaymentMethod[] = ['ZELLE'];
 export function isManualMethod(m: PaymentMethod | null | undefined): boolean {
   return !!m && MANUAL_METHODS.includes(m);
 }
+
+const METHOD_LABELS: Record<string, string> = {
+  ACH: 'ACH', ACH_DIRECT: 'Bank debit', CARD: 'Card',
+  ZELLE: 'Zelle', CASHAPP: 'Cash App', VENMO: 'Venmo', CHIME: 'Chime',
+};
 export function appLabel(m: PaymentMethod): string {
-  return TRANSFER_APPS.find((a) => a.key === m)?.label ?? m;
+  return METHOD_LABELS[m] ?? m;
 }
 
 const BALANCE_LEAD_DAYS = 14;

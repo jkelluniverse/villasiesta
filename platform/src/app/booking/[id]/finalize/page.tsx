@@ -1,8 +1,9 @@
 import { prisma } from '@/lib/db';
 import { loadPropertyPricing, computeQuote } from '@/lib/pricing';
 import { splitEligible } from '@/lib/finalize';
-import { toKey } from '@/lib/dates';
+import { addDays, toKey, todayKey } from '@/lib/dates';
 import { squareConfigured, squareEnvironment } from '@/lib/square';
+import { achConfigured } from '@/lib/ach';
 import { TRANSFER_APPS, HOST_NAME, HOST_PHONE } from '@/lib/manual';
 import { BookingStatus } from '@prisma/client';
 import Link from 'next/link';
@@ -74,6 +75,10 @@ export default async function FinalizePage({ params }: { params: { id: string } 
             transferApps={TRANSFER_APPS}
             hostName={HOST_NAME}
             hostPhone={HOST_PHONE}
+            todayKey={todayKey()}
+            balanceDueKey={addDays(ci, -14)}
+            nsfFee={booking.property.nsfFee}
+            instantAchEnabled={achConfigured()}
           />
         </section>
       </div>

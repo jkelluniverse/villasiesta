@@ -10,6 +10,7 @@ import { approvedFinalize, declined, paidConfirmation, depositReceipt, ownerPaym
 import { toEmailBooking } from '@/lib/email-data';
 import { buildArrivalEmail, arrivalReady } from '@/lib/arrival';
 import { recordManualPayment } from '@/lib/manual';
+import { decryptBankDetails } from '@/lib/ach';
 import { logComms } from '@/lib/comms';
 import { splitEligible } from '@/lib/finalize';
 import { createPaymentLink, toCents } from '@/lib/square';
@@ -138,6 +139,14 @@ export async function recordManualPaymentAction(input: RecordManualInput): Promi
     });
     if (!res.ok) return { ok: false, error: res.error };
 
+    // A recorded bank debit settles the ACH mandate (purge cron keys off settledAt).
+    if (input.method === 'ACH_DIRECT') {
+      await prisma.achAuthorization.updateMany({
+        where: { bookingId: input.bookingId, status: { in: ['authorized', 'originated'] } },
+        data: { status: 'settled', settledAt: new Date() },
+      });
+    }
+
     // Settlement emails mirror the Square path.
     const b = await prisma.booking.findUnique({ where: { id: input.bookingId }, include: { client: true } });
     if (b) {
@@ -156,6 +165,92 @@ export async function recordManualPaymentAction(input: RecordManualInput): Promi
     revalidatePath('/owner');
     revalidatePath('/owner/bookings');
     revalidatePath(`/owner/bookings/${input.bookingId}`);
+    return { ok: true };
+  } catch (e) {
+    return { ok: false, error: (e as Error).message };
+  }
+}
+
+export type RevealedAch = {
+  ok: boolean; error?: string;
+  nameOnAccount?: string; bankName?: string; routing?: string; account?: string; type?: string;
+};
+
+/** THE one place full bank numbers are decrypted — owner-only, audit-logged
+ * to CommsLog on every call, and marks the mandate as being originated. */
+export async function revealAchDetails(bookingId: string): Promise<RevealedAch> {
+  try {
+    const session = await requireOwner();
+    const auth = await prisma.achAuthorization.findFirst({
+      where: { bookingId, encBlob: { not: '' } },
+      orderBy: { consentAt: 'desc' },
+      include: { booking: { select: { clientId: true, reference: true } } },
+    });
+    if (!auth) return { ok: false, error: 'No bank details on file (or already purged).' };
+    const details = decryptBankDetails(auth.encBlob);
+    await logComms(auth.booking.clientId, CommsType.BILL, `ACH details revealed for origination (${auth.booking.reference}) by ${session.user?.email || 'owner'}`);
+    if (auth.status === 'authorized') await prisma.achAuthorization.update({ where: { id: auth.id }, data: { status: 'originated' } });
+    return { ok: true, nameOnAccount: auth.nameOnAccount, bankName: auth.bankName, routing: details.routing, account: details.account, type: details.type };
+  } catch (e) {
+    return { ok: false, error: (e as Error).message };
+  }
+}
+
+/** ACH debit came back (NSF/returned): flag it, add the returned-payment fee
+ * to the amount due, email the guest. Dates are NOT released automatically. */
+export async function markAchReturned(bookingId: string): Promise<ActionResult> {
+  try {
+    await requireOwner();
+    const b = await prisma.booking.findUnique({ where: { id: bookingId }, include: { client: true, property: true } });
+    if (!b) return { ok: false, error: 'not_found' };
+    const auth = await prisma.achAuthorization.findFirst({ where: { bookingId }, orderBy: { consentAt: 'desc' } });
+    if (!auth) return { ok: false, error: 'No ACH authorization on this booking.' };
+    if (auth.status === 'returned') return { ok: false, error: 'Already marked returned.' };
+
+    const fee = b.property.nsfFee;
+    const money2 = (n: number) => Math.round(n * 100) / 100;
+    await prisma.$transaction(async (tx) => {
+      await tx.achAuthorization.update({ where: { id: auth.id }, data: { status: 'returned', settledAt: null } });
+      await tx.booking.update({
+        where: { id: bookingId },
+        data: {
+          // Money never arrived: back to awaiting payment, with the fee added.
+          status: BookingStatus.APPROVED, balancePaid: false,
+          total: money2(b.total + fee),
+          holdExpiresAt: new Date(Date.now() + 5 * 864e5),
+        },
+      });
+    });
+
+    const amountDue = money2(b.total + fee);
+    await sendEmail({
+      to: b.client.email, replyTo: notifyEmails()[0],
+      subject: `Payment returned — Villa Siesta ${b.reference}`,
+      text: [
+        `Hi ${b.client.firstName},`, '',
+        `Your bank returned the ACH payment for your stay ${toKey(b.checkIn)} → ${toKey(b.checkOut)}, so your reservation isn't confirmed yet.`,
+        `A ${b.property.currency}${fee} returned-payment fee (per your authorization) has been added — the amount now due is ${b.property.currency}${amountDue.toLocaleString()}.`,
+        `Please pay from your booking page${process.env.APP_URL ? `:\n${process.env.APP_URL}/booking/${b.id}/finalize` : '.'}`,
+        '', 'Your dates are still being held for now.', '', '— Villa Siesta',
+      ].join('\n'),
+    });
+    await logComms(b.clientId, CommsType.EMAIL, `ach-returned (+${fee} NSF fee, due ${amountDue})`);
+    revalidatePath('/owner');
+    revalidatePath('/owner/bookings');
+    revalidatePath(`/owner/bookings/${bookingId}`);
+    return { ok: true };
+  } catch (e) {
+    return { ok: false, error: (e as Error).message };
+  }
+}
+
+/** Save the returned-payment (NSF) fee — Settings, no deploy needed. */
+export async function saveNsfFee(amount: number): Promise<ActionResult> {
+  try {
+    await requireOwner();
+    if (!Number.isFinite(amount) || amount < 0 || amount > 500) return { ok: false, error: 'Enter a fee between 0 and 500.' };
+    await prisma.property.update({ where: { slug: DEFAULT_SLUG }, data: { nsfFee: Math.round(amount * 100) / 100 } });
+    revalidatePath('/owner/settings');
     return { ok: true };
   } catch (e) {
     return { ok: false, error: (e as Error).message };

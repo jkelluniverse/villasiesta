@@ -69,6 +69,38 @@ root stays live until you switch over. To cut over:
 5. The domain `villasiestasarasota.com` already points at this Railway service —
    nothing to reprint.
 
+## Instant ACH (direct bank details) — how it works + compliance flags
+
+Guests can enter routing/account numbers on the Finalize page ("⚡ Instant ACH").
+**Square never sees these numbers** — its ACH rail only takes Plaid tokens. The site
+stores an encrypted authorization (`AchAuthorization`), holds the dates, and emails
+you to **originate the debit through the business bank**, then you *Record manual
+payment (Bank debit)* on the booking to settle it. Requires `ACH_ENC_KEY`
+(generate: `openssl rand -base64 32`) — without it the option simply doesn't show.
+
+Data handling: full numbers exist only AES-256-GCM-encrypted at rest; the portal
+shows last-4 everywhere; the one "Reveal for origination" button decrypts server-side,
+owner-only, and logs every reveal to CommsLog; the calendar sweep purges encrypted
+blobs 30 days after settlement (last4 + the signed authorization stay for the audit
+trail). The consent tuple (exact text + timestamp + IP + user agent) is retained —
+that's your proof under NACHA WEB-debit rules if a debit is disputed.
+
+**⚠ Compliance flags (not legal advice):**
+- **NACHA account validation:** first-use WEB debits require a "commercially
+  reasonable" account-validation step — a self-attestation checkbox alone does not
+  satisfy it. Cheapest compliant paths: originate through the bank's own portal (its
+  validation applies) or add micro-deposit verification later.
+- **Returned-payment (NSF) fee:** many states cap these by statute — Florida's
+  service-fee statute caps below $55 for most amounts. Confirm the enforceable figure
+  with your attorney; the amount is editable in **Settings → Payments** (no deploy).
+- **Statement descriptor:** the guest notice says the charge appears as
+  "Property Investment Group Services, Inc." — that descriptor is set by the
+  originating bank account, so confirm it matches the entity on the account you
+  debit from.
+- Fully automating origination later requires a processor that accepts raw bank
+  data via API (Dwolla / Modern Treasury tier — or Forte). Square will never take
+  these numbers.
+
 ## Data model
 See `prisma/schema.prisma`. Everything is keyed by `propertyId` (multi-property ready).
 Photos are static JPGs in `public/photos/` with labels seeded from `prisma/photos.json`.

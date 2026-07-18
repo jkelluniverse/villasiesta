@@ -1,7 +1,8 @@
 'use client';
 import { useEffect, useRef, useState } from 'react';
+import InstantAchForm from './InstantAchForm';
 
-type Method = 'ach' | 'card' | 'zelle';
+type Method = 'instant' | 'ach' | 'card' | 'zelle';
 const MANUAL: Method[] = ['zelle'];
 const money = (c: string, n: number) => c + Math.round(n).toLocaleString();
 
@@ -27,15 +28,17 @@ export default function FinalizeForm(props: {
   splitEligible: boolean; guestName: string; squareConfigured: boolean; squareEnv: string;
   appId: string; locationId: string;
   transferApps: TransferApp[]; hostName: string; hostPhone: string;
+  todayKey: string; balanceDueKey: string; nsfFee: number; instantAchEnabled: boolean;
 }) {
   const { currency: cur } = props;
-  const [method, setMethod] = useState<Method>('ach');
+  const [method, setMethod] = useState<Method>(props.instantAchEnabled ? 'instant' : 'ach');
   const [plan, setPlan] = useState<'full' | 'split'>('full');
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState('');
   const [notice, setNotice] = useState('');
   const [copied, setCopied] = useState(false);
   const [claimed, setClaimed] = useState<string | null>(null);
+  const [achDone, setAchDone] = useState(false);
   const [sdkReady, setSdkReady] = useState(false);
   const paymentsRef = useRef<SqPayments | null>(null);
   const cardRef = useRef<SqCard | null>(null);
@@ -76,8 +79,8 @@ export default function FinalizeForm(props: {
   }, [useSquare, sdkReady, method]);
 
   const isManual = MANUAL.includes(method);
-  const total = method === 'card' ? props.cardTotal : method === 'ach' ? props.achTotal : props.baseTotal;
-  const showSplit = props.splitEligible && method === 'card';   // split runs on a card
+  const total = method === 'card' ? props.cardTotal : (method === 'ach' || method === 'instant') ? props.achTotal : props.baseTotal;
+  const showSplit = props.splitEligible && method === 'card';   // Square split runs on a card
   const effectivePlan = showSplit ? plan : 'full';
   const showTotal = effectivePlan === 'split' ? Math.round(total / 2) : total;
 
@@ -118,8 +121,7 @@ export default function FinalizeForm(props: {
     window.location.href = `/booking/${props.bookingId}`;
   }
 
-  async function pay(e: React.FormEvent) {
-    e.preventDefault();
+  async function pay() {
     setErr(''); setBusy(true);
 
     if (!useSquare) { await post(undefined); return; }
@@ -166,7 +168,7 @@ export default function FinalizeForm(props: {
     }
   }
 
-  const methodLabel: Record<Method, string> = { ach: 'Bank transfer (ACH)', card: 'Credit / Debit card', zelle: 'Zelle' };
+  const methodLabel: Record<Method, string> = { instant: '⚡ Instant ACH — enter your bank details', ach: 'ACH via Plaid (bank login)', card: 'Credit / Debit card', zelle: 'Zelle' };
 
   if (claimed) {
     return (
@@ -178,22 +180,28 @@ export default function FinalizeForm(props: {
     );
   }
 
+  if (achDone) {
+    return (
+      <div className="pay-manual" style={{ textAlign: 'center' }}>
+        <div style={{ fontSize: '2rem', marginBottom: 8 }}>⚡</div>
+        <h3 className="fin-h" style={{ marginBottom: 6 }}>Authorization received — your dates are held.</h3>
+        <p>We&apos;ll email you when the payment posts (1–3 business days). Reservation <b>{props.reference}</b>.</p>
+      </div>
+    );
+  }
+
+  const pickable: Method[] = [...(props.instantAchEnabled ? (['instant'] as Method[]) : []), 'ach', 'card', ...MANUAL];
+
   return (
-    <form onSubmit={pay}>
+    <div>
       <h3 className="fin-h">How you&apos;ll pay</h3>
 
       <div className="pay-methods">
-        {(['ach', 'card'] as Method[]).map((m) => (
+        {pickable.map((m) => (
           <label key={m} className={`pay-opt${method === m ? ' on' : ''}`}>
             <input type="radio" name="method" checked={method === m} onChange={() => setMethod(m)} />
             <span>{methodLabel[m]}</span>
-            <em>{m === 'ach' ? `+${props.achPct}%` : `+${props.cardPct}%`}</em>
-          </label>
-        ))}
-        {MANUAL.map((m) => (
-          <label key={m} className={`pay-opt${method === m ? ' on' : ''}`}>
-            <input type="radio" name="method" checked={method === m} onChange={() => setMethod(m)} />
-            <span>{methodLabel[m]}</span><em>no fee</em>
+            <em>{m === 'card' ? `+${props.cardPct}%` : m === 'zelle' ? 'no fee' : `+${props.achPct}%`}</em>
           </label>
         ))}
       </div>
@@ -207,7 +215,18 @@ export default function FinalizeForm(props: {
         <div className="pay-note" style={{ textAlign: 'left', marginBottom: 12 }}>The 50/50 payment plan runs on a card — choose Credit/Debit to split your payment.</div>
       ) : null}
 
-      {isManual ? (
+      {method === 'instant' ? (
+        <InstantAchForm
+          bookingId={props.bookingId}
+          currency={cur}
+          achTotal={props.achTotal}
+          splitEligible={props.splitEligible}
+          todayKey={props.todayKey}
+          balanceDueKey={props.balanceDueKey}
+          nsfFee={props.nsfFee}
+          onDone={() => setAchDone(true)}
+        />
+      ) : isManual ? (
         <div className="pay-manual pay-transfer">
           <p style={{ marginBottom: 12 }}>Send <b>{money(cur, total)}</b> to the owner via <b>{app?.label}</b>:</p>
           <div className="tf-dest">
@@ -243,12 +262,12 @@ export default function FinalizeForm(props: {
           ) : null}
           {notice ? <div className="pay-note" style={{ textAlign: 'left' }}>{notice}</div> : null}
           {err ? <div className="formerr">{err}</div> : null}
-          <button className="btn btn-navy" type="submit" disabled={busy} style={{ width: '100%', marginTop: 8 }}>
+          <button className="btn btn-navy" type="button" onClick={pay} disabled={busy} style={{ width: '100%', marginTop: 8 }}>
             {busy ? 'Processing…' : `Pay ${money(cur, showTotal)} & confirm 🔒`}
           </button>
           {!props.squareConfigured ? <div className="pay-note">Test mode — no live payment processor connected yet. Clicking pay simulates a successful charge.</div> : null}
         </>
       )}
-    </form>
+    </div>
   );
 }

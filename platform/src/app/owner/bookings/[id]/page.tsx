@@ -7,6 +7,7 @@ import OwnerBar from '../../OwnerBar';
 import StatusPill from '../../StatusPill';
 import BookingActions from '../BookingActions';
 import RecordManualPayment from '../RecordManualPayment';
+import AchPanel from '../AchPanel';
 
 export const dynamic = 'force-dynamic';
 
@@ -98,12 +99,15 @@ export default async function BookingDetailPage({ params }: { params: { id: stri
                     currency={cur}
                     total={b.total}
                     outstanding={b.summary.remaining || b.total}
-                    highlight={!!b.manualClaimApp}
+                    highlight={!!b.manualClaimApp || (!!b.ach && ['authorized', 'originated'].includes(b.ach.status))}
                     claimedApp={b.manualClaimApp}
+                    defaultMethod={b.ach && ['authorized', 'originated'].includes(b.ach.status) ? 'ACH_DIRECT' : undefined}
                   />
                 </div>
               ) : null}
             </div>
+
+            {b.ach ? <AchPanel bookingId={b.id} ach={b.ach} isOwner={isOwner} /> : null}
 
             <div className="bd-card">
               <h2>Guest</h2>

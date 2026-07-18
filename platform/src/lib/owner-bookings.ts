@@ -91,6 +91,10 @@ export type PaymentRecord = {
 export type PaymentSummary = { paid: number; total: number; remaining: number; complete: boolean; failed: boolean };
 export type Banner = { tone: StatusTone; text: string };
 export type ActivityEntry = { at: string; type: string; detail: string | null };
+export type AchInfo = {
+  id: string; nameOnAccount: string; bankName: string; routingLast4: string; accountLast4: string;
+  status: string; consentAt: string; authText: string; purged: boolean;
+};
 
 export type BookingDetail = {
   id: string;
@@ -103,6 +107,7 @@ export type BookingDetail = {
   banner: Banner;
   manualClaimApp: string | null;
   manualClaimAt: string | null;
+  ach: AchInfo | null;
   guestName: string;
   firstName: string;
   email: string;
@@ -155,6 +160,9 @@ export async function getBookingDetail(id: string): Promise<BookingDetail | null
 
   // Manual transfer-app receipts recorded by the owner (the paper trail).
   const manualRows = await prisma.manualPayment.findMany({ where: { bookingId: b.id }, orderBy: { receivedAt: 'asc' } });
+  // Latest instant-ACH mandate (masked — full numbers only via the audited Reveal).
+  const achAuth = await prisma.achAuthorization.findFirst({ where: { bookingId: b.id }, orderBy: { consentAt: 'desc' } });
+  const achPending = !!achAuth && ['authorized', 'originated'].includes(achAuth.status) && b.status === 'APPROVED';
 
   // ---- Payment records, derived from live status ----
   // Square: the deposit/full payment id is pulled live for real amount + fee +
@@ -177,6 +185,14 @@ export async function getBookingDetail(id: string): Promise<BookingDetail | null
     payments.push({
       label: appLabel(mp.method), amount: Math.round(mp.amount), state: 'paid',
       when: toKey(mp.receivedAt), method: mp.method, memo: mp.memo, live: null,
+    });
+  }
+  // Pending instant-ACH debit: authorized, not yet settled by the owner.
+  if (achPending && achAuth) {
+    payments.push({
+      label: `Instant ACH · ${achAuth.bankName} ••••${achAuth.accountLast4}`,
+      amount: Math.round(b.total), state: 'pending',
+      when: toKey(achAuth.consentAt), method: 'ACH_DIRECT', memo: null, live: null,
     });
   }
   // Fallback so a paid booking never reads "nothing charged" (e.g. manual reconcile).
@@ -214,9 +230,17 @@ export async function getBookingDetail(id: string): Promise<BookingDetail | null
     status: b.status,
     statusLabel: displayStatus(b).label,
     planLabel: planLabel(b.paymentPlan),
-    banner: buildBanner(b, cur, { paid, remaining, split, lastBillAt: lastBill?.sentAt ?? null, paidWhen: primaryWhen }),
+    banner: achPending && achAuth
+      ? { tone: 'sapphire', text: `ACH initiated — ${bMoney(cur, b.total)} authorized ${bDay(toKey(achAuth.consentAt))} · awaiting settlement (originate the debit, then record it).` }
+      : buildBanner(b, cur, { paid, remaining, split, lastBillAt: lastBill?.sentAt ?? null, paidWhen: primaryWhen }),
     manualClaimApp: b.manualClaimApp ? appLabel(b.manualClaimApp) : null,
     manualClaimAt: b.manualClaimAt ? b.manualClaimAt.toISOString() : null,
+    ach: achAuth ? {
+      id: achAuth.id, nameOnAccount: achAuth.nameOnAccount, bankName: achAuth.bankName,
+      routingLast4: achAuth.routingLast4, accountLast4: achAuth.accountLast4,
+      status: achAuth.status, consentAt: achAuth.consentAt.toISOString(),
+      authText: achAuth.authText, purged: !achAuth.encBlob,
+    } : null,
     guestName: `${b.client.firstName} ${b.client.lastName}`.trim(),
     firstName: b.client.firstName,
     email: b.client.email,

@@ -1,0 +1,49 @@
+<svg viewBox="0 0 760 360" xmlns="http://www.w3.org/2000/svg" font-family="Arial, Helvetica, sans-serif">
+  <!-- background -->
+  <rect width="760" height="360" fill="#FBF7F0"/>
+  <!-- check body -->
+  <rect x="40" y="30" width="680" height="250" rx="10" fill="#ffffff" stroke="#C9D0DD" stroke-width="2"/>
+  <!-- decorative bank header -->
+  <text x="70" y="72" font-size="17" font-weight="bold" fill="#20242C">YOUR NAME</text>
+  <text x="70" y="92" font-size="12" fill="#726A5C">123 Main Street · Anytown, USA</text>
+  <text x="640" y="72" font-size="13" fill="#726A5C">1025</text>
+  <text x="540" y="105" font-size="12" fill="#726A5C">Date ____________</text>
+  <!-- payee line -->
+  <text x="70" y="140" font-size="12" fill="#726A5C">Pay to the order of ___________________________________________</text>
+  <rect x="580" y="122" width="110" height="26" fill="none" stroke="#C9D0DD"/>
+  <text x="588" y="140" font-size="12" fill="#726A5C">$</text>
+  <text x="70" y="172" font-size="12" fill="#726A5C">_____________________________________________________ Dollars</text>
+  <!-- bank name highlighted -->
+  <rect x="62" y="188" width="200" height="30" rx="6" fill="#E9EDF7" stroke="#213677" stroke-width="1.6"/>
+  <text x="74" y="208" font-size="14" font-weight="bold" fill="#213677">FIRST EXAMPLE BANK</text>
+  <text x="540" y="230" font-size="12" fill="#726A5C">Signature ____________</text>
+  <!-- MICR line -->
+  <g font-family="'Courier New', monospace" font-size="22" fill="#20242C">
+    <!-- routing -->
+    <rect x="60" y="238" width="168" height="34" rx="6" fill="#E7F1EB" stroke="#2C6E52" stroke-width="2"/>
+    <text x="72" y="262">⑆123456789⑆</text>
+    <!-- account -->
+    <rect x="242" y="238" width="196" height="34" rx="6" fill="#F6EEDA" stroke="#8A6B1E" stroke-width="2"/>
+    <text x="254" y="262">000123456789⑈</text>
+    <!-- check number -->
+    <text x="452" y="262" fill="#9A9285">1025</text>
+  </g>
+  <!-- callouts -->
+  <g font-size="14" font-weight="bold">
+    <line x1="144" y1="276" x2="144" y2="304" stroke="#2C6E52" stroke-width="2"/>
+    <circle cx="144" cy="310" r="12" fill="#2C6E52"/>
+    <text x="139" y="315" fill="#ffffff">1</text>
+    <text x="164" y="315" fill="#2C6E52">Routing number · 9 digits</text>
+
+    <line x1="340" y1="276" x2="340" y2="304" stroke="#8A6B1E" stroke-width="2"/>
+    <circle cx="340" cy="310" r="12" fill="#8A6B1E"/>
+    <text x="335" y="315" fill="#ffffff">2</text>
+    <text x="360" y="315" fill="#8A6B1E">Account number</text>
+
+    <line x1="162" y1="203" x2="30" y2="203" stroke="#213677" stroke-width="0"/>
+    <circle cx="288" cy="203" r="12" fill="#213677"/>
+    <text x="283" y="208" fill="#ffffff">3</text>
+    <text x="308" y="208" fill="#213677">Bank name</text>
+  </g>
+  <text x="380" y="348" text-anchor="middle" font-size="12" fill="#726A5C">Find these at the bottom of any check — routing first, then your account number.</text>
+</svg>

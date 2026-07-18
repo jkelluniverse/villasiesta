@@ -202,3 +202,16 @@ form.req .btn-navy{width:100%;margin-top:6px}
 .tf-chip-text{font-weight:700;color:var(--navy);font-size:.95rem;word-break:break-word}
 .tf-chip-copy{flex:none;font-size:.72rem;font-weight:700;letter-spacing:.04em;text-transform:uppercase;color:#fff;background:var(--navy);border-radius:999px;padding:5px 12px}
 .tf-memo-help{font-size:.76rem;color:var(--muted);margin-top:8px}
+
+/* instant ACH (direct bank details) */
+.iach-grid{display:grid;grid-template-columns:1fr 1fr;gap:12px 14px;margin-bottom:14px}
+.iach-grid .full{grid-column:1/-1}
+.iach-grid label{display:block;font-size:.72rem;font-weight:600;letter-spacing:.05em;text-transform:uppercase;color:var(--muted);margin-bottom:5px}
+.iach-grid input,.iach-grid select{width:100%;padding:.65rem .75rem;border:1px solid var(--line,#e2ddd2);border-radius:8px;font:inherit;font-size:.95rem;background:#fff}
+.iach-grid input:focus,.iach-grid select:focus{outline:2px solid var(--navy);outline-offset:1px}
+.iach-err{font-size:.78rem;color:#9c4a46;margin-top:5px}
+.iach-check{width:100%;height:auto;border:1px solid var(--line,#e2ddd2);border-radius:10px;margin:4px 0 16px}
+.iach-consent{display:flex;gap:10px;align-items:flex-start;background:var(--gray,#f4f1ea);border-radius:10px;padding:12px 14px;margin-bottom:10px;font-size:.85rem;line-height:1.55;color:var(--ink);cursor:pointer}
+.iach-consent input{margin-top:3px;flex:none;width:16px;height:16px}
+.iach-notice{font-size:.82rem;line-height:1.6;color:var(--muted);background:#fff;border:1px dashed var(--line,#e2ddd2);border-radius:10px;padding:11px 14px;margin-top:4px}
+@media(max-width:560px){.iach-grid{grid-template-columns:1fr}}

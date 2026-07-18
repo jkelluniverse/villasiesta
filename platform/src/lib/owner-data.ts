@@ -6,7 +6,7 @@ import { addDays, toKey, todayKey } from './dates';
 
 export type Metric = { netThisMonth: number; netDeltaPct: number | null; prevMonthLabel: string; occupancyPct: number; ytdNet: number; nextPayout: { amount: number; date: string } | null };
 export type AttentionItem = {
-  bookingId: string; type: 'request' | 'payment' | 'balance_failed' | 'manual_claim' | 'manual_balance' | 'conflict';
+  bookingId: string; type: 'request' | 'payment' | 'balance_failed' | 'manual_claim' | 'manual_balance' | 'ach_originate' | 'conflict';
   status: BookingStatus;
   name: string; email: string; phone: string | null; dates: string; nights: number; total: number; guests: number; message?: string | null;
   app?: string; unverified?: boolean; dueDate?: string;
@@ -32,7 +32,7 @@ export async function getDashboard(slug: string): Promise<Dashboard | null> {
   const [bookings, ranges, owner] = await Promise.all([
     prisma.booking.findMany({
       where: { propertyId: property.id },
-      include: { client: true },
+      include: { client: true, achAuthorizations: { orderBy: { consentAt: 'desc' }, take: 1 } },
       orderBy: { checkIn: 'asc' },
     }),
     getBlockedRanges(property.id),
@@ -81,8 +81,13 @@ export async function getDashboard(slug: string): Promise<Dashboard | null> {
     const claimUnverified = !!b.manualClaimAt && (Date.now() - b.manualClaimAt.getTime()) > 3 * 864e5;
     const balanceOverdue = !b.balancePaid && !!b.balanceDueDate && toKey(b.balanceDueDate) < today;
 
+    const achPending = b.achAuthorizations[0] && ['authorized', 'originated'].includes(b.achAuthorizations[0].status);
+
     if (b.status === BookingStatus.REQUESTED) {
       attention.push({ ...base, type: 'request', message: b.message });
+    } else if (achPending && b.status === BookingStatus.APPROVED) {
+      // Guest authorized an instant-ACH debit — owner must originate + record.
+      attention.push({ ...base, type: 'ach_originate', app: `${b.achAuthorizations[0].bankName} ••••${b.achAuthorizations[0].accountLast4}` });
     } else if (claimApp && (b.status === BookingStatus.APPROVED || b.status === BookingStatus.PARTIALLY_PAID)) {
       // Guest pressed "I've sent it" — owner must verify + record. Nothing paid yet.
       attention.push({ ...base, type: 'manual_claim', app: claimApp, unverified: claimUnverified });
@@ -93,7 +98,7 @@ export async function getDashboard(slug: string): Promise<Dashboard | null> {
       attention.push({ ...base, type: b.squareCardId ? 'balance_failed' : 'manual_balance', dueDate: toKey(b.balanceDueDate!) });
     }
   });
-  const order = { request: 0, manual_claim: 1, conflict: 2, balance_failed: 3, manual_balance: 4, payment: 5 };
+  const order = { request: 0, ach_originate: 1, manual_claim: 2, conflict: 3, balance_failed: 4, manual_balance: 5, payment: 6 };
   attention.sort((a, b) => order[a.type] - order[b.type]);
 
   const occupancy30 = Array.from({ length: 30 }, (_, i) => {

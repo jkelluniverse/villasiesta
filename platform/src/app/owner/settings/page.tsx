@@ -6,6 +6,7 @@ import { DEFAULT_SLUG } from '@/lib/property';
 import OwnerBar from '../OwnerBar';
 import ArrivalEditor from './ArrivalEditor';
 import AirbnbSyncEditor from './AirbnbSyncEditor';
+import NsfFeeEditor from './NsfFeeEditor';
 
 export const dynamic = 'force-dynamic';
 
@@ -19,7 +20,7 @@ export default async function SettingsPage() {
     select: {
       address: true, doorCode: true, wifiName: true, wifiPassword: true,
       parkingNotes: true, arrivalNotes: true, houseRules: true, autoArrival: true,
-      checkinTime: true, checkoutTime: true, airbnbIcalUrl: true,
+      checkinTime: true, checkoutTime: true, airbnbIcalUrl: true, nsfFee: true,
     },
   });
 
@@ -54,6 +55,15 @@ export default async function SettingsPage() {
             <AirbnbSyncEditor initial={p?.airbnbIcalUrl ?? ''} />
           ) : (
             <div className="op-note">Read-only access — only the owner can edit the sync link.</div>
+          )}
+        </div>
+
+        <div className="bd-card" style={{ maxWidth: 640, marginTop: 20 }}>
+          <h2>Payments</h2>
+          {isOwner ? (
+            <NsfFeeEditor initial={p?.nsfFee ?? 55} />
+          ) : (
+            <div className="op-note">Read-only access — only the owner can edit payment settings.</div>
           )}
         </div>
       </div>

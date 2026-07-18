@@ -28,11 +28,13 @@ export default function AttentionRow({ item, currency, isOwner }: { item: Attent
     item.type === 'balance_failed' ? `Balance failed · ${item.name}` :
     item.type === 'manual_claim' ? `${item.unverified ? 'Unverified — ' : ''}Payment claimed · ${item.name}` :
     item.type === 'manual_balance' ? `Manual balance due · ${item.name}` :
+    item.type === 'ach_originate' ? `ACH to originate · ${item.name}` :
     `Conflict · ${item.name}`;
 
   const dot =
     item.type === 'balance_failed' || item.type === 'manual_claim' ? 'conflict' :
-    item.type === 'manual_balance' ? 'payment' : item.type;
+    item.type === 'manual_balance' ? 'payment' :
+    item.type === 'ach_originate' ? 'request' : item.type;
 
   return (
     <div className="op-row">
@@ -56,6 +58,10 @@ export default function AttentionRow({ item, currency, isOwner }: { item: Attent
             <button className="op-btn op-btn-primary" disabled={pending} onClick={() => act(approveBooking, 'Approved')}>{pending ? '…' : 'Approve'}</button>
             <button className="op-btn op-btn-danger" disabled={pending} onClick={() => act(declineBooking, 'Declined')}>Decline</button>
           </>
+        ) : item.type === 'ach_originate' ? (
+          isOwner
+            ? <Link className="op-btn op-btn-primary" href={`/owner/bookings/${item.bookingId}`}>Originate &amp; record →</Link>
+            : <span className="op-role">Awaiting owner</span>
         ) : item.type === 'manual_claim' ? (
           isOwner
             ? <Link className="op-btn op-btn-primary" href={`/owner/bookings/${item.bookingId}`}>Verify &amp; record →</Link>

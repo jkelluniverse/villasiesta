@@ -282,6 +282,31 @@ export function ownerPaymentAlert(b: B & { lastName: string }, kind: "deposit" |
   return { subject, html, text: textFallback(subject, b) };
 }
 
+/** Instant-ACH mandate received — owner + dad must originate the debit at the bank. */
+export function ownerAchAuthorization(b: B & { lastName: string }, opts: {
+  amount: number; bankName: string; accountLast4: string;
+  split?: boolean; balance?: number; balanceDate?: string;
+}) {
+  const subject = `ACH authorization received — originate debit${b.reference ? ` [${b.reference}]` : ""} — ${b.firstName} ${b.lastName} — ${fmtUSD(opts.amount)}`;
+  const html = layout({
+    preheader: `Originate ${fmtUSD(opts.amount)} from ${opts.bankName} ····${opts.accountLast4}, then record it in the portal.`,
+    badge: { label: "⚡ Originate ACH debit", bg: "#F6EEDA", ink: "#8A6B1E" },
+    title: `${b.firstName} authorized an ACH debit.`,
+    bodyHtml:
+      para(`Originate the debit through the business bank, then open the booking and <b style="color:${INK}">Record manual payment</b> (method: Bank debit). Dates are held; nothing is marked paid until you record it. Full account details are in the portal behind the audited Reveal button — never in email.`) +
+      detailCard([
+        ...refRow(b),
+        ["Guest", `${b.firstName} ${b.lastName}`],
+        ["Debit now", fmtUSD(opts.amount)],
+        ...(opts.split && opts.balance ? [["Second debit", `${fmtUSD(opts.balance)} · ${opts.balanceDate || ""}`] as [string, string]] : []),
+        ["Account", `${opts.bankName} ····${opts.accountLast4}`],
+        ["Dates", `${fmtDate(b.checkIn)} → ${fmtDate(b.checkOut)}`],
+      ]),
+    cta: { label: "Open the booking", url: `${SITE}/owner` },
+  });
+  return { subject, html, text: textFallback(subject, b) };
+}
+
 /** Guest pressed "I've sent it" by a transfer app — owner + dad must verify receipt. */
 export function ownerManualClaim(b: B & { lastName: string }, opts: { app: string; amount: number }) {
   const subject = `Manual payment claimed — verify${b.reference ? ` [${b.reference}]` : ""} — ${b.firstName} ${b.lastName} — ${opts.app} ${fmtUSD(opts.amount)}`;

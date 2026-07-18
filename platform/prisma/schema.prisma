@@ -53,6 +53,7 @@ model Property {
   arrivalNotes   String?
   houseRules     String[]
   autoArrival    Boolean  @default(true)   // auto-send arrival email 3 days before check-in
+  nsfFee         Float    @default(55)     // returned-ACH fee (⚠ confirm state-law cap before changing)
   createdAt      DateTime @default(now())
 
   photos       Photo[]
@@ -140,6 +141,7 @@ enum BookingStatus {
 
 enum PaymentMethod {
   ACH
+  ACH_DIRECT   // owner-originated ACH from guest-provided bank details
   CARD
   ZELLE
   CASHAPP
@@ -192,9 +194,35 @@ model Booking {
   client   Client   @relation(fields: [clientId], references: [id])
   block    CalendarBlock?
   manualPayments ManualPayment[]
+  achAuthorizations AchAuthorization[]
 
   @@index([propertyId, status])
   @@index([checkIn, checkOut])
+}
+
+// ---------- Instant ACH (direct bank details, owner-originated) ----------
+// The site never sends these numbers to Square — the owner originates the
+// debit at the bank. Full routing/account live ONLY in encBlob (AES-256-GCM,
+// key from ACH_ENC_KEY); everything else shows last4. The consent tuple
+// (authText + consentAt + ipAddress + userAgent) is the NACHA WEB-debit proof.
+model AchAuthorization {
+  id            String   @id @default(cuid())
+  bookingId     String
+  nameOnAccount String
+  bankName      String
+  routingLast4  String            // display only
+  accountLast4  String            // display only
+  encBlob       String            // AES-256-GCM ciphertext of {routing, account, type}
+  authText      String            // the exact authorization language shown
+  ipAddress     String
+  userAgent     String
+  consentAt     DateTime @default(now())
+  status        String   @default("authorized") // authorized|originated|settled|returned|voided
+  settledAt     DateTime?
+  createdAt     DateTime @default(now())
+  booking       Booking  @relation(fields: [bookingId], references: [id], onDelete: Cascade)
+
+  @@index([bookingId])
 }
 
 // ---------- Manual transfer-app payments (Cash App / Venmo / Zelle / Chime) ----------

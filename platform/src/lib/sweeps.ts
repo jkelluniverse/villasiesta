@@ -47,8 +47,31 @@ export async function runBalanceSweep(): Promise<{ due: number; charged: number;
         out.failed++;
         continue;
       }
-      // Manual split (no card on file): remind the guest to send the transfer.
+      // Manual split (no card on file): remind the guest to send the transfer —
+      // unless there's an ACH mandate covering the second debit, which is the
+      // OWNER's action (originate at the bank), not the guest's.
       if (!b.squareCardId || !b.squareCustomerId) {
+        const achAuth = await prisma.achAuthorization.findFirst({
+          where: { bookingId: b.id, status: { in: ['authorized', 'originated', 'settled'] } },
+          orderBy: { consentAt: 'desc' },
+        });
+        if (achAuth) {
+          const alreadyAch = await prisma.commsLog.findFirst({
+            where: { clientId: b.clientId, type: CommsType.EMAIL, detail: 'ach-balance-originate', sentAt: b.balanceDueDate ? { gte: b.balanceDueDate } : undefined },
+          });
+          if (!alreadyAch) {
+            await sendEmail({
+              to: b.client.email, replyTo: notifyEmails()[0],
+              subject: `Balance debit coming up — Villa Siesta ${b.reference}`,
+              text: `Hi ${b.client.firstName},\n\nPer your ACH authorization, the remaining balance of ${b.property.currency}${balance.toLocaleString()} for your stay ${ci} → ${toKey(b.checkOut)} will be debited from your account ending ••••${achAuth.accountLast4} in the next few days. No action needed.\n\n— Villa Siesta`,
+            });
+            await logComms(b.clientId, CommsType.EMAIL, 'ach-balance-originate');
+            await alertOwner(b.id, `ACH split balance ${b.property.currency}${balance.toLocaleString()} due (${b.reference}) — originate the second debit from ${achAuth.bankName} ••••${achAuth.accountLast4}, then record it (Bank debit).`);
+            out.reminded++;
+            console.log(`[sweep] ${b.id}: ACH balance origination prompted`);
+          }
+          continue;
+        }
         const already = await prisma.commsLog.findFirst({
           where: { clientId: b.clientId, type: CommsType.EMAIL, detail: 'manual-balance-reminder', sentAt: b.balanceDueDate ? { gte: b.balanceDueDate } : undefined },
         });
@@ -157,13 +180,15 @@ export async function runArrivalSweep(): Promise<{ due: number; sent: number; sk
   return out;
 }
 
-/** Expire stale APPROVED holds + pull the Airbnb iCal feed. */
-export async function runCalendarSweep(): Promise<{ expired: number; airbnb: { ok: boolean; imported?: number; error?: string } }> {
+/** Expire stale APPROVED holds + pull the Airbnb iCal feed + purge old bank data. */
+export async function runCalendarSweep(): Promise<{ expired: number; purged: number; airbnb: { ok: boolean; imported?: number; error?: string } }> {
   const stale = await prisma.booking.findMany({
     where: {
       status: BookingStatus.APPROVED,
       holdExpiresAt: { lt: new Date() },
       manualClaimAt: null,          // a claimed Zelle payment keeps the hold for verification
+      // An authorized ACH debit is the OWNER's action item — never auto-expire it.
+      achAuthorizations: { none: { status: { in: ['authorized', 'originated'] } } },
     },
     include: { client: true, property: true },
   });
@@ -192,5 +217,13 @@ export async function runCalendarSweep(): Promise<{ expired: number; airbnb: { o
   if (sync.ok) console.log(`[cal-sweep] airbnb sync: ${sync.imported ?? 0} imported`);
   else console.error(`[cal-sweep] airbnb sync failed: ${sync.error}`);
 
-  return { expired: stale.length, airbnb: { ok: sync.ok, imported: sync.imported, error: sync.error } };
+  // Bank-data hygiene: null encrypted routing/account 30 days after settlement
+  // (the masked last4 + consent record stay for the audit trail).
+  const purge = await prisma.achAuthorization.updateMany({
+    where: { status: 'settled', settledAt: { lt: new Date(Date.now() - 30 * 864e5) }, encBlob: { not: '' } },
+    data: { encBlob: '' },
+  });
+  if (purge.count) console.log(`[cal-sweep] purged bank details from ${purge.count} settled ACH authorization(s)`);
+
+  return { expired: stale.length, purged: purge.count, airbnb: { ok: sync.ok, imported: sync.imported, error: sync.error } };
 }
