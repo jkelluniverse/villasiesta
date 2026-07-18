@@ -40,7 +40,13 @@ export default function InstantAchForm(props: {
   );
   const feeText = useMemo(() => buildAchFeeText(props.nsfFee), [props.nsfFee]);
 
-  const routingBad = touched.routing && !validRoutingNumber(routing);
+  // Progressive routing feedback: length first (bank apps show it masked as
+  // "•••9984", so short entries are the common miss), checksum only at 9 digits.
+  const routingOk = validRoutingNumber(routing);
+  const routingMsg =
+    !touched.routing || routing.length === 0 || routingOk ? '' :
+    routing.length < 9 ? `Routing numbers are 9 digits — you've entered ${routing.length}. If your bank shows it as “•••${routing.slice(-4)}”, tap to reveal the full number.` :
+    'That routing number doesn’t look right — double-check each digit against the diagram below (it’s the first 9-digit group on a check).';
   const accountBad = touched.account && !validAccountNumber(account);
   const confirmBad = touched.account2 && account2.length > 0 && account !== account2;
 
@@ -93,10 +99,11 @@ export default function InstantAchForm(props: {
           <input value={bank} onChange={(e) => setBank(e.target.value)} autoComplete="off" required />
         </div>
         <div>
-          <label>Routing number</label>
-          <input inputMode="numeric" maxLength={9} value={routing} autoComplete="off"
-            onChange={(e) => setRouting(digits(e.target.value))} onBlur={() => setTouched((t) => ({ ...t, routing: true }))} required />
-          {routingBad ? <div className="iach-err">That routing number doesn&apos;t look right — check the diagram below.</div> : null}
+          <label>Routing number {routingOk ? <span className="iach-ok">✓</span> : null}</label>
+          <input inputMode="numeric" maxLength={9} value={routing} autoComplete="off" placeholder="9 digits"
+            onChange={(e) => { setRouting(digits(e.target.value)); if (digits(e.target.value).length === 9) setTouched((t) => ({ ...t, routing: true })); }}
+            onBlur={() => setTouched((t) => ({ ...t, routing: true }))} required />
+          {routingMsg ? <div className="iach-err">{routingMsg}</div> : null}
         </div>
         <div>
           <label>Account type</label>
@@ -106,10 +113,10 @@ export default function InstantAchForm(props: {
           </select>
         </div>
         <div>
-          <label>Account number</label>
+          <label>Account number {validAccountNumber(account) ? <span className="iach-ok">✓</span> : null}</label>
           <input inputMode="numeric" maxLength={17} value={account} autoComplete="off"
             onChange={(e) => setAccount(digits(e.target.value))} onBlur={() => setTouched((t) => ({ ...t, account: true }))} required />
-          {accountBad ? <div className="iach-err">Account numbers are 4–17 digits.</div> : null}
+          {accountBad ? <div className="iach-err">Account numbers are 4–17 digits — enter the full number, not the masked “••••” version.</div> : null}
         </div>
         <div>
           <label>Confirm account number</label>
