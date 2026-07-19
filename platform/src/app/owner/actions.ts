@@ -4,7 +4,7 @@ import { revalidatePath } from 'next/cache';
 import { authOptions } from '@/lib/auth';
 import { prisma } from '@/lib/db';
 import { assertRangeAvailable } from '@/lib/availability';
-import { addDays, parseKey, toKey } from '@/lib/dates';
+import { addDays, nightsBetween, parseKey, toKey } from '@/lib/dates';
 import { sendEmail, sendTemplate, notifyEmails } from '@/lib/email';
 import { approvedFinalize, declined, paidConfirmation, depositReceipt, ownerPaymentAlert } from '@/lib/emails';
 import { toEmailBooking } from '@/lib/email-data';
@@ -12,6 +12,8 @@ import { buildArrivalEmail, arrivalReady } from '@/lib/arrival';
 import { recordManualPayment } from '@/lib/manual';
 import { decryptBankDetails } from '@/lib/ach';
 import { applyCustomRate } from '@/lib/pricing-rules';
+import { computeAdjusted, loadOwnerPricing } from '@/lib/owner-pricing';
+import { newUniqueReference } from '@/lib/reference';
 import { logComms } from '@/lib/comms';
 import { splitEligible } from '@/lib/finalize';
 import { createPaymentLink, toCents } from '@/lib/square';
@@ -326,6 +328,143 @@ export async function sendArrivalEmail(bookingId: string): Promise<ActionResult>
     return { ok: true };
   } catch (e) {
     return { ok: false, error: (e as Error).message };
+  }
+}
+
+export type AdjustPriceInput = { bookingId: string; nightly: number; discount: number };
+
+/** Adjust one booking's price (custom nightly rate and/or a discount) before
+ * money moves. Sets priceCustom so every payment path — finalize page, Square
+ * charge, Instant ACH — uses the STORED money instead of requoting from rules. */
+export async function adjustBookingPrice(input: AdjustPriceInput): Promise<ActionResult> {
+  try {
+    await requireOwner();
+    const b = await prisma.booking.findUnique({ where: { id: input.bookingId }, include: { property: true } });
+    if (!b) return { ok: false, error: 'not_found' };
+    if (b.status !== BookingStatus.REQUESTED && b.status !== BookingStatus.APPROVED)
+      return { ok: false, error: 'Price can only be changed before payment — this booking already has money on it.' };
+    if (!Number.isFinite(input.nightly) || input.nightly < 0 || input.nightly > 10000)
+      return { ok: false, error: 'Enter a nightly rate between 0 and 10,000.' };
+    if (!Number.isFinite(input.discount) || input.discount < 0)
+      return { ok: false, error: 'The discount can’t be negative.' };
+
+    const op = await loadOwnerPricing(DEFAULT_SLUG);
+    if (!op) return { ok: false, error: 'pricing_unavailable' };
+
+    const money = computeAdjusted({
+      subtotal: input.nightly * b.nights,
+      discount: input.discount,
+      cleaningFee: b.cleaningFee,
+      petFee: b.petFee,
+      taxPercent: op.taxPercent,
+    });
+
+    const offerSplit = b.depositAmount != null || b.balanceAmount != null;
+    await prisma.booking.update({
+      where: { id: b.id },
+      data: {
+        subtotal: money.subtotal, discount: money.discount, taxAmount: money.taxAmount,
+        total: money.total, priceCustom: true,
+        // Re-derive the persisted 50/50 offer from the new total.
+        depositAmount: offerSplit ? Math.round((money.total / 2) * 100) / 100 : null,
+        balanceAmount: offerSplit ? Math.round((money.total - money.total / 2) * 100) / 100 : null,
+      },
+    });
+    await logComms(b.clientId, CommsType.BILL, `price adjusted (${b.reference}): nightly ${input.nightly}, discount ${money.discount} → total ${money.total}`);
+    revalidatePath('/owner');
+    revalidatePath('/owner/bookings');
+    revalidatePath(`/owner/bookings/${b.id}`);
+    return { ok: true };
+  } catch (e) {
+    return { ok: false, error: (e as Error).message };
+  }
+}
+
+export type ManualBookingInput = {
+  firstName: string; lastName: string; email: string; phone?: string;
+  checkIn: string; checkOut: string; guests: number;
+  nightly?: number | null;       // custom $/night; empty → price from the rate calendar
+  discount?: number;             // $ off the lodging subtotal
+  noCleaningFee?: boolean;       // waive cleaning (family comps)
+  markPaid?: boolean;            // money already handled (or comp) — confirm + lock dates now
+  sendEmail?: boolean;           // email the guest (finalize link, or confirmation if markPaid)
+};
+
+/** Create a full reservation from the portal (friends/family, phone bookings).
+ * Owner pricing rules apply but min-nights does NOT — the owner may book any
+ * length. Availability is still enforced transactionally. */
+export async function createManualBooking(input: ManualBookingInput): Promise<ActionResult & { bookingId?: string }> {
+  try {
+    await requireOwner();
+    const { checkIn, checkOut } = input;
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(checkIn) || !/^\d{4}-\d{2}-\d{2}$/.test(checkOut) || checkIn >= checkOut)
+      return { ok: false, error: 'Pick a valid date range.' };
+    if (!input.firstName.trim() || !input.lastName.trim() || !/.+@.+\..+/.test(input.email))
+      return { ok: false, error: 'Guest name and a valid email are required.' };
+    const nights = nightsBetween(checkIn, checkOut);
+    const guests = Math.min(Math.max(1, Math.round(input.guests || 1)), 20);
+
+    const op = await loadOwnerPricing(DEFAULT_SLUG);
+    if (!op) return { ok: false, error: 'pricing_unavailable' };
+
+    const subtotal = input.nightly != null && input.nightly !== undefined && Number.isFinite(input.nightly)
+      ? Math.max(0, input.nightly) * nights
+      : op.nightlyFor({ checkIn, checkOut });
+    const cleaningFee = input.noCleaningFee ? 0 : op.cleaning;
+    const money = computeAdjusted({
+      subtotal, discount: input.discount ?? 0, cleaningFee, petFee: 0, taxPercent: op.taxPercent,
+    });
+
+    const markPaid = !!input.markPaid;
+    const booking = await prisma.$transaction(async (tx) => {
+      await assertRangeAvailable(tx, op.propertyId, checkIn, checkOut);
+      const client = await tx.client.upsert({
+        where: { email: input.email.toLowerCase().trim() },
+        update: { firstName: input.firstName.trim(), lastName: input.lastName.trim(), phone: input.phone?.trim() || undefined },
+        create: { email: input.email.toLowerCase().trim(), firstName: input.firstName.trim(), lastName: input.lastName.trim(), phone: input.phone?.trim() || null },
+      });
+      const created = await tx.booking.create({
+        data: {
+          reference: await newUniqueReference(tx),
+          propertyId: op.propertyId,
+          clientId: client.id,
+          checkIn: parseKey(checkIn),
+          checkOut: parseKey(checkOut),
+          nights, guests,
+          subtotal: money.subtotal, cleaningFee, petFee: 0,
+          discount: money.discount, taxAmount: money.taxAmount, cardFee: 0,
+          total: money.total, priceCustom: true,
+          status: markPaid ? BookingStatus.PAID : BookingStatus.APPROVED,
+          balancePaid: markPaid,
+          // A generous week-long hold — this guest was invited, not queued.
+          holdExpiresAt: markPaid ? null : new Date(Date.now() + 7 * 864e5),
+          message: 'Created by owner from the portal',
+        },
+        include: { client: true, property: true },
+      });
+      if (markPaid) {
+        await tx.calendarBlock.create({
+          data: { propertyId: op.propertyId, startDate: parseKey(checkIn), endDate: parseKey(checkOut), source: BlockSource.BOOKING, bookingId: created.id, summary: 'Booked (owner)' },
+        });
+      }
+      return created;
+    });
+
+    await logComms(booking.clientId, CommsType.BILL, `manual booking ${booking.reference} created by owner (${markPaid ? 'marked paid' : 'awaiting payment'}, total ${money.total})`);
+    if (input.sendEmail) {
+      const eb = toEmailBooking(booking, booking.client);
+      if (markPaid) await sendTemplate(booking.client.email, paidConfirmation(eb), notifyEmails()[0]);
+      else await sendTemplate(booking.client.email, approvedFinalize(eb), notifyEmails()[0]);
+      await logComms(booking.clientId, CommsType.EMAIL, markPaid ? 'paid-confirmation (manual booking)' : 'approved-finalize (manual booking)');
+    }
+
+    revalidatePath('/owner');
+    revalidatePath('/owner/bookings');
+    revalidatePath('/owner/calendar');
+    return { ok: true, bookingId: booking.id };
+  } catch (e) {
+    const msg = (e as Error).message;
+    return { ok: false, error: msg === 'DATES_UNAVAILABLE' ? 'Those dates conflict with another booking or block.' : msg };
   }
 }
 

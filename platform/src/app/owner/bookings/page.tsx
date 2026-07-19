@@ -6,6 +6,7 @@ import { DEFAULT_SLUG } from '@/lib/property';
 import { listBookings, filterBookings, type BookingTab, type BookingRow } from '@/lib/owner-bookings';
 import OwnerBar from '../OwnerBar';
 import StatusPill from '../StatusPill';
+import NewBookingModal from './NewBookingModal';
 
 export const dynamic = 'force-dynamic';
 
@@ -27,6 +28,7 @@ const TABS: { key: BookingTab; label: string }[] = [
 export default async function BookingsPage({ searchParams }: { searchParams: { tab?: string; q?: string } }) {
   const session = await getServerSession(authOptions);
   if (!session?.user) redirect('/owner/login');
+  const isOwner = session.user.role === 'OWNER';
 
   const tab = (TABS.find((t) => t.key === searchParams.tab)?.key ?? 'upcoming') as BookingTab;
   const q = (searchParams.q ?? '').trim();
@@ -40,7 +42,10 @@ export default async function BookingsPage({ searchParams }: { searchParams: { t
     <>
       <OwnerBar active="bookings" />
       <div className="op-wrap">
-        <h1>Bookings</h1>
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, marginBottom: 22 }}>
+          <h1 style={{ margin: 0 }}>Bookings</h1>
+          {isOwner ? <NewBookingModal currency={CUR} /> : null}
+        </div>
 
         <div className="bk-tabs">
           {TABS.map((t) => (

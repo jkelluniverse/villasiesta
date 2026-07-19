@@ -166,9 +166,11 @@ model Booking {
   subtotal       Float          // sum of per-night rates
   cleaningFee    Float          @default(0)
   petFee         Float          @default(0)
+  discount       Float          @default(0)    // owner-applied discount (off the lodging subtotal)
   taxAmount      Float          @default(0)
   cardFee        Float          @default(0)
   total          Float
+  priceCustom    Boolean        @default(false) // owner set/adjusted the price — payment paths use the STORED money, never recompute from rules
   status         BookingStatus  @default(REQUESTED)
   paymentMethod  PaymentMethod?
   paymentPlan    PaymentPlan    @default(FULL)

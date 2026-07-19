@@ -4,6 +4,7 @@ import { loadPropertyPricing, computeQuote } from './pricing';
 import { assertRangeAvailable } from './availability';
 import { addDays, nightsBetween, parseKey, toKey, todayKey } from './dates';
 import { createSquarePayment, createSquareCustomer, createCardOnFile, toCents } from './square';
+import { storedBaseTotal } from './owner-pricing';
 import { sendEmail, sendTemplate, notifyEmails } from './email';
 import { depositReceipt, paidConfirmation, ownerPaymentAlert } from './emails';
 import { logComms } from './comms';
@@ -38,15 +39,21 @@ export async function finalizeBooking(input: FinalizeInput): Promise<FinalizeRes
     return { ok: true, status: booking.status };
   if (booking.status !== BookingStatus.APPROVED) return { ok: false, error: 'not_finalizable' };
 
-  const loaded = await loadPropertyPricing(booking.property.slug);
-  if (!loaded) return { ok: false, error: 'pricing_unavailable' };
-
   const ci = toKey(booking.checkIn), co = toKey(booking.checkOut);
 
-  // Server-side money. Base = no-fee total; card multiplies at charge time (§0/§3).
-  const baseQuote = computeQuote(loaded.pricing, { checkIn: ci, checkOut: co, guests: booking.guests, pet: booking.petFee > 0, method: 'ach' });
-  if (!baseQuote.ok) return { ok: false, error: baseQuote.error };
-  const baseTotal = baseQuote.total;
+  // Server-side money. Base = no-fee total; card/ACH markup applies at charge
+  // time. An owner-adjusted booking (priceCustom) charges its STORED money —
+  // never a fresh quote, or the discount would silently vanish here.
+  let baseTotal: number;
+  if (booking.priceCustom) {
+    baseTotal = storedBaseTotal(booking);
+  } else {
+    const loaded = await loadPropertyPricing(booking.property.slug);
+    if (!loaded) return { ok: false, error: 'pricing_unavailable' };
+    const baseQuote = computeQuote(loaded.pricing, { checkIn: ci, checkOut: co, guests: booking.guests, pet: booking.petFee > 0, method: 'ach' });
+    if (!baseQuote.ok) return { ok: false, error: baseQuote.error };
+    baseTotal = baseQuote.total;
+  }
 
   const useSplit = input.plan === 'split';
   if (useSplit && !splitEligible(ci)) return { ok: false, error: 'split_not_available' };

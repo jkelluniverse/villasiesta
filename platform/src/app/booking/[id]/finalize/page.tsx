@@ -3,6 +3,7 @@ import { loadPropertyPricing, computeQuote } from '@/lib/pricing';
 import { splitEligible } from '@/lib/finalize';
 import { addDays, toKey, todayKey } from '@/lib/dates';
 import { squareConfigured, squareEnvironment } from '@/lib/square';
+import { storedBaseTotal } from '@/lib/owner-pricing';
 import { achConfigured } from '@/lib/ach';
 import { TRANSFER_APPS, HOST_NAME, HOST_PHONE } from '@/lib/manual';
 import { BookingStatus } from '@prisma/client';
@@ -31,7 +32,22 @@ export default async function FinalizePage({ params }: { params: { id: string } 
   const cur = booking.property.currency;
   const baseQuote = loaded ? computeQuote(loaded.pricing, { checkIn: ci, checkOut: co, guests: booking.guests, pet: booking.petFee > 0, method: 'ach' }) : null;
   const cardPct = loaded?.pricing.fees.cardPercent ?? 3;
-  const baseTotal = baseQuote?.ok ? baseQuote.total : Math.round(booking.total);
+
+  // Owner-adjusted price: show the STORED breakdown (incl. any discount) —
+  // the same money the payment endpoints will charge.
+  const custom = booking.priceCustom;
+  const baseTotal = custom
+    ? Math.round(storedBaseTotal(booking))
+    : baseQuote?.ok ? baseQuote.total : Math.round(booking.total);
+  const lines = custom
+    ? [
+        { label: `${Math.round(booking.subtotal / booking.nights)} avg × ${booking.nights} nights`, amount: booking.subtotal },
+        ...(booking.discount > 0 ? [{ label: 'Discount', amount: -booking.discount }] : []),
+        ...(booking.cleaningFee > 0 ? [{ label: 'Cleaning fee', amount: booking.cleaningFee }] : []),
+        ...(booking.petFee > 0 ? [{ label: 'Pet fee', amount: booking.petFee }] : []),
+        ...(booking.taxAmount > 0 ? [{ label: 'Tax', amount: booking.taxAmount }] : []),
+      ]
+    : baseQuote?.ok ? baseQuote.lines : [];
   const cardTotal = Math.round(baseTotal * (1 + cardPct / 100));
   const achTotal = Math.round(baseTotal * (1 + ACH_PCT / 100));
 
@@ -44,10 +60,10 @@ export default async function FinalizePage({ params }: { params: { id: string } 
         <aside className="fin-summary">
           <h3 style={{ fontFamily: 'var(--font-display)', fontSize: '1.6rem' }}>{booking.property.name}</h3>
           <div style={{ color: 'var(--muted)', marginBottom: 16 }}>{niceDate(ci)} – {niceDate(co)} · {booking.nights} nights · {booking.guests} guests</div>
-          {baseQuote?.ok ? (
+          {lines.length ? (
             <div className="quote" style={{ marginTop: 0 }}>
-              {baseQuote.lines.map((l, k) => (
-                <div className="r" key={k}><span>{l.label.replace(/^(\d)/, (m0) => cur + m0)}</span><span className="tnum">{cur}{Math.round(l.amount).toLocaleString()}</span></div>
+              {lines.map((l, k) => (
+                <div className="r" key={k}><span>{l.label.replace(/^(\d)/, (m0) => cur + m0)}</span><span className="tnum">{l.amount < 0 ? `−${cur}${Math.round(-l.amount).toLocaleString()}` : `${cur}${Math.round(l.amount).toLocaleString()}`}</span></div>
               ))}
               <div className="r total"><span>Total (transfer app · no fee)</span><b className="tnum">{cur}{baseTotal.toLocaleString()}</b></div>
               <div className="r hint">Processing fees, disclosed here and on your receipt: bank transfer +{ACH_PCT}% ({cur}{achTotal.toLocaleString()}), card +{cardPct}% ({cur}{cardTotal.toLocaleString()}). Zelle has no fee.</div>

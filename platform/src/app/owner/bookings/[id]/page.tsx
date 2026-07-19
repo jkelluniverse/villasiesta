@@ -7,6 +7,7 @@ import OwnerBar from '../../OwnerBar';
 import StatusPill from '../../StatusPill';
 import BookingActions from '../BookingActions';
 import RecordManualPayment from '../RecordManualPayment';
+import AdjustPriceModal from '../AdjustPriceModal';
 import AchPanel from '../AchPanel';
 
 export const dynamic = 'force-dynamic';
@@ -67,7 +68,8 @@ export default async function BookingDetailPage({ params }: { params: { id: stri
 
               <div style={{ marginTop: 16 }}>
                 <div className="op-label" style={{ marginBottom: 8 }}>Price breakdown</div>
-                <div className="bd-line"><span className="k">Nightly subtotal</span><span className="v num">{money(b.subtotal)}</span></div>
+                <div className="bd-line"><span className="k">Nightly subtotal{b.priceCustom ? ' (owner-set)' : ''}</span><span className="v num">{money(b.subtotal)}</span></div>
+                {b.discount ? <div className="bd-line"><span className="k">Discount</span><span className="v num" style={{ color: 'var(--jade)' }}>−{money(b.discount)}</span></div> : null}
                 {b.cleaningFee ? <div className="bd-line"><span className="k">Cleaning</span><span className="v num">{money(b.cleaningFee)}</span></div> : null}
                 {b.petFee ? <div className="bd-line"><span className="k">Pet fee</span><span className="v num">{money(b.petFee)}</span></div> : null}
                 {b.taxAmount ? <div className="bd-line"><span className="k">Tax</span><span className="v num">{money(b.taxAmount)}</span></div> : null}
@@ -91,6 +93,15 @@ export default async function BookingDetailPage({ params }: { params: { id: stri
             <div className="bd-card">
               <h2>Actions</h2>
               <BookingActions id={b.id} status={b.status} isOwner={isOwner} />
+              {isOwner && (b.status === 'REQUESTED' || b.status === 'APPROVED') ? (
+                <div style={{ marginTop: 10 }}>
+                  <AdjustPriceModal
+                    bookingId={b.id} reference={b.reference} currency={cur}
+                    nights={b.nights} subtotal={b.subtotal} discount={b.discount}
+                    cleaningFee={b.cleaningFee} petFee={b.petFee} taxPercent={b.taxPercent} total={b.total}
+                  />
+                </div>
+              ) : null}
               {isOwner && b.status !== 'CANCELLED' && b.status !== 'EXPIRED' ? (
                 <div style={{ marginTop: 12, borderTop: '1px solid var(--hairline)', paddingTop: 12 }}>
                   <RecordManualPayment

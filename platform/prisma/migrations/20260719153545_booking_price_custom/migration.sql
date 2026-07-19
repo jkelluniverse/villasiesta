@@ -1,0 +1,4 @@
+-- AlterTable
+ALTER TABLE "Booking" ADD COLUMN     "discount" DOUBLE PRECISION NOT NULL DEFAULT 0,
+ADD COLUMN     "priceCustom" BOOLEAN NOT NULL DEFAULT false;
+

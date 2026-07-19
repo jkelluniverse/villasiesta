@@ -2,6 +2,7 @@ import { prisma } from './db';
 import { BookingStatus } from '@prisma/client';
 import { getPaymentDetails, type PaymentDetails } from './square';
 import { displayStatus, planLabel, type StatusTone } from './bookingStatus';
+import { taxPercentFor } from './owner-pricing';
 import { appLabel } from './manual';
 import { toKey, todayKey } from './dates';
 
@@ -124,9 +125,12 @@ export type BookingDetail = {
   subtotal: number;
   cleaningFee: number;
   petFee: number;
+  discount: number;
   taxAmount: number;
   cardFee: number;
   total: number;
+  priceCustom: boolean;
+  taxPercent: number;
   balanceDueDate: string | null;
   holdExpiresAt: string | null;
   createdAt: string;
@@ -257,9 +261,12 @@ export async function getBookingDetail(id: string): Promise<BookingDetail | null
     subtotal: b.subtotal,
     cleaningFee: b.cleaningFee,
     petFee: b.petFee,
+    discount: b.discount,
     taxAmount: b.taxAmount,
     cardFee: b.cardFee,
     total: b.total,
+    priceCustom: b.priceCustom,
+    taxPercent: await taxPercentFor(b.propertyId),
     balanceDueDate: b.balanceDueDate ? toKey(b.balanceDueDate) : null,
     holdExpiresAt: b.holdExpiresAt ? b.holdExpiresAt.toISOString() : null,
     createdAt: b.createdAt.toISOString(),
