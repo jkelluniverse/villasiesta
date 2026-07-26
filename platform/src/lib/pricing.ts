@@ -5,7 +5,7 @@ import type { Fees, PropertyPricing } from './quote-core';
 
 export * from './quote-core';
 
-type RuleRow = Pick<Prisma.PricingRuleGetPayload<{}>, 'type' | 'month' | 'startDate' | 'endDate' | 'value'>;
+type RuleRow = Pick<Prisma.PricingRuleGetPayload<{}>, 'type' | 'month' | 'startDate' | 'endDate' | 'value' | 'upliftExempt'>;
 type FeeRow = Pick<Prisma.FeeGetPayload<{}>, 'type' | 'amount' | 'threshold'>;
 
 export function buildFees(feeRows: FeeRow[]): Fees {
@@ -43,12 +43,18 @@ export async function loadPropertyPricing(slug: string): Promise<{ propertyId: s
       end: toKey(r.endDate as Date),
       type: r.type as 'CUSTOM' | 'MIN_NIGHTS',
       value: r.value as number,
+      upliftExempt: r.upliftExempt,
     }));
-  const rates = Object.values(seasonal).filter((n) => n > 0);
+  const uplift = 1 + (property.directRateUplift || 0) / 100;
+  const rates = Object.values(seasonal).filter((n) => n > 0).map((n) => Math.round(n * uplift));
   const rateRangeLabel = rates.length ? `${property.currency}${Math.min(...rates)}–${property.currency}${Math.max(...rates)}` : '';
 
   return {
     propertyId: property.id,
-    pricing: { currency: property.currency, minNights: property.minNights, maxNights: property.maxNights, seasonal, custom, fees: buildFees(property.fees), rateRangeLabel },
+    pricing: {
+      currency: property.currency, minNights: property.minNights, maxNights: property.maxNights,
+      seasonal, custom, fees: buildFees(property.fees), rateRangeLabel,
+      upliftPct: property.directRateUplift || 0, airbnbFeePct: property.airbnbFeePct || 0,
+    },
   };
 }

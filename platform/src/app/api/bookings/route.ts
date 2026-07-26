@@ -2,8 +2,9 @@ import { NextRequest, NextResponse } from 'next/server';
 import { z } from 'zod';
 import { prisma } from '@/lib/db';
 import { computeQuote, loadPropertyPricing } from '@/lib/pricing';
-import { assertRangeAvailable } from '@/lib/availability';
-import { parseKey } from '@/lib/dates';
+import { planCompStay } from '@/lib/stay-core';
+import { assertRangeAvailable, getBlockedRanges } from '@/lib/availability';
+import { parseKey, todayKey } from '@/lib/dates';
 import { sendTemplate, notifyEmails } from '@/lib/email';
 import { requestReceived, ownerNewRequest } from '@/lib/emails';
 import { newUniqueReference } from '@/lib/reference';
@@ -22,6 +23,7 @@ const BookingInput = z.object({
   checkOut: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
   pet: z.coerce.boolean().optional().default(false),
   message: z.string().optional().default(''),
+  side: z.enum(['after', 'before']).optional(),   // 5–6 night stays: where the complimentary nights go
 });
 
 export async function POST(req: NextRequest) {
@@ -34,17 +36,31 @@ export async function POST(req: NextRequest) {
 
   const loaded = await loadPropertyPricing(input.slug);
   if (!loaded) return NextResponse.json({ error: 'property_not_found' }, { status: 404 });
+  const propertyMeta = await prisma.property.findUnique({ where: { id: loaded.propertyId }, select: { commissionPercent: true } });
 
-  // Always price server-side (never trust a client-sent total).
+  // Plan the reservation: a 5–6 night selection books as a genuine full-week
+  // reservation with the unused nights complimentary (server-authoritative).
+  const blocked = await getBlockedRanges(loaded.propertyId);
+  const isFree = (a: string, b: string) => a < b && !blocked.some((r) => a < r.end && b > r.start);
+  const plan = planCompStay({ checkIn: input.checkIn, checkOut: input.checkOut, side: input.side, isFree, todayKey: todayKey() });
+  if (!plan.ok) return NextResponse.json({ error: 'dates_unavailable', message: plan.error, suggestion: plan.suggestion }, { status: 409 });
+
+  // Always price server-side, on the nights the guest pays for.
   const quote = computeQuote(loaded.pricing, {
-    checkIn: input.checkIn, checkOut: input.checkOut, guests: input.guests, pet: input.pet, method: 'ach',
+    checkIn: plan.stayCheckIn, checkOut: plan.stayCheckOut, guests: input.guests, pet: input.pet, method: 'ach',
+    compNights: plan.compNights,
   });
   if (!quote.ok) return NextResponse.json({ error: 'invalid_dates', message: quote.error }, { status: 400 });
 
+  // Commission snapshot — frozen now; later rate changes never alter this booking.
+  const commissionPercent = propertyMeta?.commissionPercent ?? 0;
+  const commissionBase = Math.round((quote.subtotal + quote.cleaning + quote.pet + quote.extraGuest) * 100) / 100;
+  const commissionAmount = Math.round(commissionBase * commissionPercent) / 100;
+
   try {
     const booking = await prisma.$transaction(async (tx) => {
-      // Atomic double-booking guard: re-verify inside the transaction.
-      await assertRangeAvailable(tx, loaded.propertyId, input.checkIn, input.checkOut);
+      // Atomic double-booking guard over the FULL reservation span.
+      await assertRangeAvailable(tx, loaded.propertyId, plan.checkIn, plan.checkOut);
 
       const client = await tx.client.upsert({
         where: { email: input.email.toLowerCase() },
@@ -57,9 +73,12 @@ export async function POST(req: NextRequest) {
           reference: await newUniqueReference(tx),
           propertyId: loaded.propertyId,
           clientId: client.id,
-          checkIn: parseKey(input.checkIn),
-          checkOut: parseKey(input.checkOut),
-          nights: quote.nights,
+          checkIn: parseKey(plan.checkIn),
+          checkOut: parseKey(plan.checkOut),
+          stayCheckIn: plan.compNights ? parseKey(plan.stayCheckIn) : null,
+          stayCheckOut: plan.compNights ? parseKey(plan.stayCheckOut) : null,
+          compNights: plan.compNights,
+          nights: quote.nights,          // billed nights (the guest's stay)
           guests: input.guests,
           subtotal: quote.subtotal,
           cleaningFee: quote.cleaning,
@@ -67,15 +86,21 @@ export async function POST(req: NextRequest) {
           taxAmount: quote.tax,
           cardFee: 0,
           total: quote.total,
+          commissionPercent, commissionBase, commissionAmount,
           message: input.message || null,
         },
       });
     });
 
     // Fire notifications after the row is safely committed.
-    await sendBookingEmails(input, quote, booking);
+    await sendBookingEmails(input, quote, booking, plan.compNights);
 
-    return NextResponse.json({ ok: true, bookingId: booking.id });
+    return NextResponse.json({
+      ok: true, bookingId: booking.id, reference: booking.reference,
+      reservation: { checkIn: plan.checkIn, checkOut: plan.checkOut },
+      stay: { checkIn: plan.stayCheckIn, checkOut: plan.stayCheckOut },
+      compNights: plan.compNights,
+    });
   } catch (e) {
     if ((e as { code?: string }).code === 'DATES_UNAVAILABLE') {
       return NextResponse.json({ error: 'dates_unavailable', message: 'Those dates were just taken. Please pick another range.' }, { status: 409 });
@@ -87,14 +112,16 @@ export async function POST(req: NextRequest) {
 
 async function sendBookingEmails(
   input: z.infer<typeof BookingInput>,
-  quote: { total: number; nights: number },
-  booking: { id: string; reference: string; checkIn: Date; checkOut: Date; guests: number },
+  quote: { total: number; nights: number; savings?: number | null },
+  booking: { id: string; reference: string; checkIn: Date; checkOut: Date; stayCheckOut: Date | null; guests: number },
+  compNights: number,
 ) {
   const owners = notifyEmails();
   const b = {
     id: booking.id, reference: booking.reference, firstName: input.firstName, lastName: input.lastName, email: input.email,
     phone: input.phone || undefined, message: input.message || undefined,
     checkIn: booking.checkIn, checkOut: booking.checkOut, nights: quote.nights, guests: booking.guests, total: quote.total,
+    savings: quote.savings ?? null, stayCheckOut: booking.stayCheckOut, compNights,
   };
   if (owners.length) await sendTemplate(owners, ownerNewRequest(b), input.email);
   await sendTemplate(input.email, requestReceived(b), owners[0]);

@@ -77,7 +77,7 @@ function Row({ r }: { r: BookingRow }) {
 
   return (
     <Link href={`/owner/bookings/${r.id}`} className="bk-row">
-      <div className="who">{r.guestName || r.email}<small className="bk-ref">{r.reference} · {r.guests} guest{r.guests === 1 ? '' : 's'}</small></div>
+      <div className="who">{r.guestName || r.email}{r.compNights > 0 ? <span className="bk-comp">7-night comp</span> : null}<small className="bk-ref">{r.reference} · {r.guests} guest{r.guests === 1 ? '' : 's'}</small></div>
       <div className="sub num">{niceRange(r.checkIn, r.checkOut)}<br /><span style={{ color: 'var(--ink3)' }}>{r.nights} nt</span></div>
       <div className="sub num">{money(r.total)}</div>
       <div><StatusPill status={r.status} /></div>

@@ -3,7 +3,7 @@ import { loadPropertyPricing, computeQuote } from '@/lib/pricing';
 import { splitEligible } from '@/lib/finalize';
 import { addDays, toKey, todayKey } from '@/lib/dates';
 import { squareConfigured, squareEnvironment } from '@/lib/square';
-import { storedBaseTotal } from '@/lib/owner-pricing';
+import { chargeForBooking } from '@/lib/booking-pricing';
 import { achConfigured } from '@/lib/ach';
 import { TRANSFER_APPS, HOST_NAME, HOST_PHONE } from '@/lib/manual';
 import { BookingStatus } from '@prisma/client';
@@ -30,26 +30,26 @@ export default async function FinalizePage({ params }: { params: { id: string } 
   const loaded = await loadPropertyPricing(booking.property.slug);
   const ci = toKey(booking.checkIn), co = toKey(booking.checkOut);
   const cur = booking.property.currency;
-  const baseQuote = loaded ? computeQuote(loaded.pricing, { checkIn: ci, checkOut: co, guests: booking.guests, pet: booking.petFee > 0, method: 'ach' }) : null;
   const cardPct = loaded?.pricing.fees.cardPercent ?? 3;
 
-  // Owner-adjusted price: show the STORED breakdown (incl. any discount) —
-  // the same money the payment endpoints will charge.
-  const custom = booking.priceCustom;
-  const baseTotal = custom
-    ? Math.round(storedBaseTotal(booking))
-    : baseQuote?.ok ? baseQuote.total : Math.round(booking.total);
-  const lines = custom
-    ? [
-        { label: `${Math.round(booking.subtotal / booking.nights)} avg × ${booking.nights} nights`, amount: booking.subtotal },
-        ...(booking.discount > 0 ? [{ label: 'Discount', amount: -booking.discount }] : []),
-        ...(booking.cleaningFee > 0 ? [{ label: 'Cleaning fee', amount: booking.cleaningFee }] : []),
-        ...(booking.petFee > 0 ? [{ label: 'Pet fee', amount: booking.petFee }] : []),
-        ...(booking.taxAmount > 0 ? [{ label: 'Tax', amount: booking.taxAmount }] : []),
-      ]
-    : baseQuote?.ok ? baseQuote.lines : [];
+  // The single resolver: owner-set price / comp-stay nights / fresh quote —
+  // exactly the money the payment endpoints will charge.
+  const charge = chargeForBooking(booking, loaded?.pricing ?? null);
+  const baseTotal = charge.ok ? Math.round(charge.baseTotal) : Math.round(booking.total);
+  const lines = charge.ok ? charge.lines : [];
   const cardTotal = Math.round(baseTotal * (1 + cardPct / 100));
   const achTotal = Math.round(baseTotal * (1 + ACH_PCT / 100));
+
+  // Savings vs Airbnb (never shown for owner-adjusted prices — no base quote).
+  const savingsQuote = !booking.priceCustom && loaded
+    ? computeQuote(loaded.pricing, {
+        checkIn: toKey(booking.stayCheckIn ?? booking.checkIn), checkOut: toKey(booking.stayCheckOut ?? booking.checkOut),
+        guests: booking.guests, pet: booking.petFee > 0, method: 'ach', compNights: booking.compNights,
+      })
+    : null;
+  const savings = savingsQuote?.ok ? savingsQuote.savings : null;
+  const airbnbEstimate = savingsQuote?.ok ? savingsQuote.airbnbEstimate : null;
+  const comp = booking.compNights > 0 && booking.stayCheckOut;
 
   return (
     <main className="wrap finalize" style={{ padding: '110px 0 80px' }}>
@@ -59,7 +59,15 @@ export default async function FinalizePage({ params }: { params: { id: string } 
       <div className="fin-grid">
         <aside className="fin-summary">
           <h3 style={{ fontFamily: 'var(--font-display)', fontSize: '1.6rem' }}>{booking.property.name}</h3>
-          <div style={{ color: 'var(--muted)', marginBottom: 16 }}>{niceDate(ci)} – {niceDate(co)} · {booking.nights} nights · {booking.guests} guests</div>
+          <div style={{ color: 'var(--muted)', marginBottom: comp ? 6 : 16 }}>
+            {comp
+              ? <>Reservation {niceDate(ci)} – {niceDate(co)} (7 nights) · Your stay: {niceDate(toKey(booking.stayCheckIn!))} – {niceDate(toKey(booking.stayCheckOut!))} · {booking.guests} guests</>
+              : <>{niceDate(ci)} – {niceDate(co)} · {booking.nights} nights · {booking.guests} guests</>}
+          </div>
+          {comp ? <div style={{ color: 'var(--muted)', fontSize: '.8rem', marginBottom: 14 }}>Booked as a full 7-night stay at a special rate — the extra nights are yours, use them or not.</div> : null}
+          {savings && airbnbEstimate ? (
+            <div className="save-chip">Estimated Airbnb total for these dates: ~{cur}{airbnbEstimate.toLocaleString()} — <b>you save ~{cur}{savings.toLocaleString()} booking direct.</b></div>
+          ) : null}
           {lines.length ? (
             <div className="quote" style={{ marginTop: 0 }}>
               {lines.map((l, k) => (

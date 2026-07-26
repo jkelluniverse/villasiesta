@@ -18,5 +18,7 @@ export function toEmailBooking(b: Booking, c: Client) {
     depositAmount: b.depositAmount,
     balanceAmount: b.balanceAmount,
     balanceDueDate: b.balanceDueDate,
+    stayCheckOut: b.stayCheckOut,
+    compNights: b.compNights,
   };
 }

@@ -7,6 +7,7 @@ import OwnerBar from '../OwnerBar';
 import ArrivalEditor from './ArrivalEditor';
 import AirbnbSyncEditor from './AirbnbSyncEditor';
 import NsfFeeEditor from './NsfFeeEditor';
+import CommissionEditor from './CommissionEditor';
 
 export const dynamic = 'force-dynamic';
 
@@ -21,6 +22,7 @@ export default async function SettingsPage() {
       address: true, doorCode: true, wifiName: true, wifiPassword: true,
       parkingNotes: true, arrivalNotes: true, houseRules: true, autoArrival: true,
       checkinTime: true, checkoutTime: true, airbnbIcalUrl: true, nsfFee: true,
+      commissionPercent: true, directRateUplift: true, airbnbFeePct: true,
     },
   });
 
@@ -58,6 +60,15 @@ export default async function SettingsPage() {
             />
           ) : (
             <div className="op-note">Read-only access — only the owner can edit the sync link.</div>
+          )}
+        </div>
+
+        <div className="bd-card" style={{ maxWidth: 640, marginTop: 20 }}>
+          <h2>Commission &amp; direct rates</h2>
+          {isOwner ? (
+            <CommissionEditor initial={{ commissionPercent: p?.commissionPercent ?? 9, directRateUplift: p?.directRateUplift ?? 7, airbnbFeePct: p?.airbnbFeePct ?? 14.5 }} />
+          ) : (
+            <div className="op-note">Read-only access — only the owner can edit commission settings.</div>
           )}
         </div>
 

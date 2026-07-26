@@ -6,8 +6,8 @@ import {
   achConfigured, encryptBankDetails, validRoutingNumber, validAccountNumber,
   buildAchAuthText, buildAchFeeText,
 } from '@/lib/ach';
-import { loadPropertyPricing, computeQuote } from '@/lib/pricing';
-import { storedBaseTotal } from '@/lib/owner-pricing';
+import { loadPropertyPricing } from '@/lib/pricing';
+import { chargeForBooking } from '@/lib/booking-pricing';
 import { splitEligible } from '@/lib/finalize';
 import { addDays, parseKey, toKey, todayKey } from '@/lib/dates';
 import { sendTemplate, notifyEmails } from '@/lib/email';
@@ -59,19 +59,13 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
   if (booking.status !== BookingStatus.APPROVED)
     return NextResponse.json({ error: 'not_finalizable', message: 'This booking isn’t awaiting payment.' }, { status: 409 });
 
-  // Money server-side, mirroring finalize: base (no-fee) total, ACH +1%.
-  // priceCustom = owner adjusted/created this booking — use its STORED money.
-  const ci = toKey(booking.checkIn), co = toKey(booking.checkOut);
-  let baseTotal: number;
-  if (booking.priceCustom) {
-    baseTotal = storedBaseTotal(booking);
-  } else {
-    const loaded = await loadPropertyPricing(booking.property.slug);
-    if (!loaded) return NextResponse.json({ error: 'pricing_unavailable' }, { status: 500 });
-    const baseQuote = computeQuote(loaded.pricing, { checkIn: ci, checkOut: co, guests: booking.guests, pet: booking.petFee > 0, method: 'ach' });
-    if (!baseQuote.ok) return NextResponse.json({ error: baseQuote.error }, { status: 400 });
-    baseTotal = baseQuote.total;
-  }
+  // Money server-side via the single resolver (owner-set price / comp-stay
+  // nights / fresh quote), mirroring finalize: base (no-fee) total, ACH +1%.
+  const ci = toKey(booking.checkIn);
+  const loaded = booking.priceCustom ? null : await loadPropertyPricing(booking.property.slug);
+  const charge = chargeForBooking(booking, loaded?.pricing ?? null);
+  if (!charge.ok) return NextResponse.json({ error: charge.error }, { status: 400 });
+  const baseTotal = charge.baseTotal;
 
   const useSplit = input.plan === 'split';
   if (useSplit && !splitEligible(ci))

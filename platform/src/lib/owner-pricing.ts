@@ -4,7 +4,7 @@
 // priceCustom booking must use its STORED money — never recompute from rules.
 
 import { prisma } from './db';
-import { loadPropertyPricing, nightlyRate } from './pricing';
+import { loadPropertyPricing, advertisedNightly } from './pricing';
 import { eachNight } from './dates';
 
 const money2 = (n: number) => Math.round(n * 100) / 100;
@@ -30,20 +30,23 @@ export function storedBaseTotal(b: { subtotal: number; discount: number; cleanin
 
 /** Property numbers a manual booking / price adjust needs. */
 export async function loadOwnerPricing(slug: string): Promise<{
-  propertyId: string; currency: string; taxPercent: number; cleaning: number;
+  propertyId: string; currency: string; taxPercent: number; cleaning: number; commissionPercent: number;
   nightlyFor: (dayKeys: { checkIn: string; checkOut: string }) => number;
 } | null> {
   const loaded = await loadPropertyPricing(slug);
   if (!loaded) return null;
   const { pricing } = loaded;
+  const meta = await prisma.property.findUnique({ where: { id: loaded.propertyId }, select: { commissionPercent: true } });
   return {
     propertyId: loaded.propertyId,
     currency: pricing.currency,
     taxPercent: pricing.fees.taxPercent,
     cleaning: pricing.fees.cleaning,
+    commissionPercent: meta?.commissionPercent ?? 0,
+    // Owner-facing pricing uses the ADVERTISED (uplifted) rate — same as guests see.
     nightlyFor: ({ checkIn, checkOut }) => {
       let sum = 0;
-      for (const day of eachNight(checkIn, checkOut)) sum += nightlyRate(day, pricing.seasonal, pricing.custom);
+      for (const day of eachNight(checkIn, checkOut)) sum += advertisedNightly(day, pricing);
       return sum;
     },
   };

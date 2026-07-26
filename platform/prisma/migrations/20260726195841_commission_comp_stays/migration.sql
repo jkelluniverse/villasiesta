@@ -1,0 +1,17 @@
+-- AlterTable
+ALTER TABLE "Booking" ADD COLUMN     "commissionAmount" DOUBLE PRECISION NOT NULL DEFAULT 0,
+ADD COLUMN     "commissionBase" DOUBLE PRECISION NOT NULL DEFAULT 0,
+ADD COLUMN     "commissionPercent" DOUBLE PRECISION NOT NULL DEFAULT 0,
+ADD COLUMN     "commissionSettled" BOOLEAN NOT NULL DEFAULT false,
+ADD COLUMN     "compNights" INTEGER NOT NULL DEFAULT 0,
+ADD COLUMN     "stayCheckIn" DATE,
+ADD COLUMN     "stayCheckOut" DATE;
+
+-- AlterTable
+ALTER TABLE "PricingRule" ADD COLUMN     "upliftExempt" BOOLEAN NOT NULL DEFAULT false;
+
+-- AlterTable
+ALTER TABLE "Property" ADD COLUMN     "airbnbFeePct" DOUBLE PRECISION NOT NULL DEFAULT 14.5,
+ADD COLUMN     "commissionPercent" DOUBLE PRECISION NOT NULL DEFAULT 9,
+ADD COLUMN     "directRateUplift" DOUBLE PRECISION NOT NULL DEFAULT 7;
+

@@ -230,4 +230,13 @@
 .lg-guest:hover{color:var(--brand)}
 .lg-guest small{display:block;color:var(--ink3);font-weight:500;font-size:.72rem;letter-spacing:.04em}
 .lg-table .pill{font-size:.66rem;padding:3px 9px}
+.lg-comm{font-size:.8rem;color:var(--ink2);display:inline-flex;align-items:center;gap:8px;flex-wrap:wrap}
+.lg-comm-state{font-size:.7rem;font-weight:700;border-radius:999px;padding:2px 9px}
+.lg-comm-state.ok{background:var(--jade-s);color:var(--jade)}
+.lg-comm-state.due{background:var(--topaz-s);color:var(--topaz)}
+.lg-comm-btn{padding:4px 10px;font-size:.72rem}
+.lg-dot{display:inline-block;width:7px;height:7px;border-radius:50%;margin-left:6px;vertical-align:1px}
+.lg-dot.ok{background:var(--jade)}
+.lg-dot.due{background:var(--topaz)}
+.bk-comp{display:inline-block;font-size:.64rem;font-weight:700;letter-spacing:.04em;background:#FBF7F0;color:#8A6B1E;border:1px solid #EAE3D6;border-radius:999px;padding:2px 8px;margin-left:6px}
 @media(max-width:640px){.cal-day{min-height:48px}.cal-tag{display:none}.cal-rate{display:none}}

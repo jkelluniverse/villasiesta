@@ -1,10 +1,10 @@
 import { prisma } from './db';
 import { BookingStatus, BlockSource, PaymentMethod, PaymentPlan } from '@prisma/client';
-import { loadPropertyPricing, computeQuote } from './pricing';
+import { loadPropertyPricing } from './pricing';
 import { assertRangeAvailable } from './availability';
 import { addDays, nightsBetween, parseKey, toKey, todayKey } from './dates';
 import { createSquarePayment, createSquareCustomer, createCardOnFile, toCents } from './square';
-import { storedBaseTotal } from './owner-pricing';
+import { chargeForBooking } from './booking-pricing';
 import { sendEmail, sendTemplate, notifyEmails } from './email';
 import { depositReceipt, paidConfirmation, ownerPaymentAlert } from './emails';
 import { logComms } from './comms';
@@ -41,19 +41,12 @@ export async function finalizeBooking(input: FinalizeInput): Promise<FinalizeRes
 
   const ci = toKey(booking.checkIn), co = toKey(booking.checkOut);
 
-  // Server-side money. Base = no-fee total; card/ACH markup applies at charge
-  // time. An owner-adjusted booking (priceCustom) charges its STORED money —
-  // never a fresh quote, or the discount would silently vanish here.
-  let baseTotal: number;
-  if (booking.priceCustom) {
-    baseTotal = storedBaseTotal(booking);
-  } else {
-    const loaded = await loadPropertyPricing(booking.property.slug);
-    if (!loaded) return { ok: false, error: 'pricing_unavailable' };
-    const baseQuote = computeQuote(loaded.pricing, { checkIn: ci, checkOut: co, guests: booking.guests, pet: booking.petFee > 0, method: 'ach' });
-    if (!baseQuote.ok) return { ok: false, error: baseQuote.error };
-    baseTotal = baseQuote.total;
-  }
+  // Server-side money via the single resolver (owner-set price / comp-stay
+  // nights / fresh quote). Card/ACH markup applies at charge time.
+  const loaded = booking.priceCustom ? null : await loadPropertyPricing(booking.property.slug);
+  const charge = chargeForBooking(booking, loaded?.pricing ?? null);
+  if (!charge.ok) return { ok: false, error: charge.error };
+  const baseTotal = charge.baseTotal;
 
   const useSplit = input.plan === 'split';
   if (useSplit && !splitEligible(ci)) return { ok: false, error: 'split_not_available' };

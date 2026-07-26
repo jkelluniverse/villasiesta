@@ -1,6 +1,7 @@
 'use client';
 import { useEffect, useMemo, useState } from 'react';
-import { computeQuote, nightlyRate, type PropertyPricing } from '@/lib/quote-core';
+import { computeQuote, advertisedNightly, type PropertyPricing } from '@/lib/quote-core';
+import { planCompStay, type CompSide } from '@/lib/stay-core';
 
 const MONTHS = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
 const pad = (n: number) => String(n).padStart(2, '0');
@@ -19,6 +20,7 @@ export default function BookingWidget({ slug = 'villa-siesta' }: { slug?: string
   const [view, setView] = useState({ y: now.getFullYear(), m: now.getMonth() });
   const [checkIn, setCheckIn] = useState<string | null>(null);
   const [checkOut, setCheckOut] = useState<string | null>(null);
+  const [side, setSide] = useState<CompSide>('after');
   const [guests, setGuests] = useState(2);
   const [pet, setPet] = useState(false);
   const [form, setForm] = useState({ first: '', last: '', email: '', phone: '', message: '' });
@@ -49,10 +51,28 @@ export default function BookingWidget({ slug = 'villa-siesta' }: { slug?: string
     return () => { alive = false; };
   }, [slug]);
 
+  // Plan the reservation: 5–6 night selections book as a genuine full-week
+  // stay with the unused nights complimentary. The server re-plans on submit.
+  const plan = useMemo(() => {
+    if (!checkIn || !checkOut) return null;
+    const isFree = (a: string, b: string) => {
+      if (a >= b || a < today) return false;
+      let d = a;
+      while (d < b) {
+        if (blocked.has(d)) return false;
+        const [yy, mm, dd] = d.split('-').map(Number);
+        d = new Date(Date.UTC(yy, mm - 1, dd + 1)).toISOString().slice(0, 10);
+      }
+      return true;
+    };
+    return planCompStay({ checkIn, checkOut, side, isFree, todayKey: today });
+  }, [checkIn, checkOut, side, blocked, today]);
+
   const quote = useMemo(() => {
-    if (!pricing || !checkIn || !checkOut) return null;
-    return computeQuote(pricing, { checkIn, checkOut, guests, pet });
-  }, [pricing, checkIn, checkOut, guests, pet]);
+    if (!pricing || !plan) return null;
+    if (!plan.ok) return { ok: false as const, error: plan.error };
+    return computeQuote(pricing, { checkIn: plan.stayCheckIn, checkOut: plan.stayCheckOut, guests, pet, compNights: plan.compNights });
+  }, [pricing, plan, guests, pet]);
 
   function hasBlockedBetween(a: string, b: string) {
     let d = a; const step = (k: string) => { const [yy, mm, dd] = k.split('-').map(Number); return new Date(Date.UTC(yy, mm - 1, dd + 1)).toISOString().slice(0, 10); };
@@ -81,7 +101,7 @@ export default function BookingWidget({ slug = 'villa-siesta' }: { slug?: string
           slug,
           firstName: form.first, lastName: form.last,      // API field names
           email: form.email, phone: form.phone, message: form.message,
-          guests, pet, checkIn, checkOut,
+          guests, pet, checkIn, checkOut, side,
         }),
       });
       const data = await res.json();
@@ -107,9 +127,11 @@ export default function BookingWidget({ slug = 'villa-siesta' }: { slug?: string
       if (key === checkIn) cls.push('sel');
       if (key === checkOut) cls.push('sel', 'end');
       if (checkIn && checkOut && key > checkIn && key < checkOut) cls.push('range');
+      // Complimentary nights of a full-week reservation — shown lighter.
+      if (plan?.ok && plan.compNights > 0 && key >= plan.checkIn && key < plan.checkOut && !(key >= plan.stayCheckIn && key < plan.stayCheckOut)) cls.push('comp');
     }
     const clickable = cls.includes('avail');
-    const rate = pricing && clickable ? nightlyRate(key, pricing.seasonal, pricing.custom) : null;
+    const rate = pricing && clickable ? advertisedNightly(key, pricing) : null;
     cells.push(
       <div key={key} className={cls.join(' ')} onClick={clickable ? () => pick(key) : undefined}>
         <span className="dnum tnum">{d}</span>
@@ -119,8 +141,11 @@ export default function BookingWidget({ slug = 'villa-siesta' }: { slug?: string
   }
 
   const cur = pricing?.currency || '$';
+  const comp = plan?.ok && plan.compNights > 0 ? plan : null;
   const selNote = checkIn && checkOut
-    ? `${niceDate(checkIn)} → ${niceDate(checkOut)}`
+    ? comp
+      ? `Reservation ${niceDate(comp.checkIn)} → ${niceDate(comp.checkOut)} (7 nights) · Your stay: ${niceDate(comp.stayCheckIn)} → ${niceDate(comp.stayCheckOut)}`
+      : `${niceDate(checkIn)} → ${niceDate(checkOut)}`
     : checkIn ? `Check-in ${niceDate(checkIn)} — now pick a check-out` : 'No dates selected yet';
 
   return (
@@ -138,14 +163,29 @@ export default function BookingWidget({ slug = 'villa-siesta' }: { slug?: string
           <span><i style={{ background: '#dce2f2' }} />Your stay</span>
           <span><i style={{ background: '#e4e8ed' }} />Unavailable</span>
         </div>
-        <div className="minnote">{pricing ? `${pricing.minNights}–${pricing.maxNights} night stays · rates vary by season (${pricing.rateRangeLabel}/night).` : (loaded ? '' : 'Loading availability…')}</div>
+        <div className="minnote">{pricing ? `${pricing.minNights}-night minimum · 5–6 night stays available as special-rate 7-night reservations · rates vary by season (${pricing.rateRangeLabel}/night).` : (loaded ? '' : 'Loading availability…')}</div>
+
+        {comp ? (
+          <div className="comp-note">
+            <b>7-night minimum stay.</b> Staying fewer nights? Your reservation is booked as a full 7-night stay at a special rate — the extra nights are yours, use them or not.
+            {plan?.ok && plan.canFlip ? (
+              <button type="button" className="comp-flip" onClick={() => setSide(side === 'after' ? 'before' : 'after')}>
+                Move the free nights {plan.side === 'after' ? 'before check-in' : 'after your stay'} ↺
+              </button>
+            ) : null}
+          </div>
+        ) : null}
+
         <div className="quote">
-          {quote?.ok ? (
+          {quote && 'lines' in quote && quote.ok ? (
             <>
               {quote.lines.map((l, k) => (
-                <div className="r" key={k}><span>{l.label.replace(/^(\d)/, (m0) => cur + m0)}</span><span className="tnum">{money(cur, l.amount)}</span></div>
+                <div className="r" key={k}><span>{l.label.replace(/^(\d)/, (m0) => cur + m0)}</span><span className="tnum">{l.amount === 0 ? `${cur}0` : money(cur, l.amount)}</span></div>
               ))}
               <div className="r total"><span>Estimated total</span><b className="tnum">{money(cur, quote.total)}</b></div>
+              {quote.savings && quote.airbnbEstimate ? (
+                <div className="save-chip">Estimated Airbnb total for these dates: ~{money(cur, quote.airbnbEstimate)} — <b>you save ~{money(cur, quote.savings)} booking direct.</b></div>
+              ) : null}
               <div className="r hint">Confirmed by the owner — no charge yet.{pricing && pricing.fees.cardPercent > 0 ? ` Paying by card adds ${pricing.fees.cardPercent}%.` : ''}</div>
             </>
           ) : (

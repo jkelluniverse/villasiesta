@@ -13,6 +13,7 @@ import { recordManualPayment } from '@/lib/manual';
 import { decryptBankDetails } from '@/lib/ach';
 import { applyCustomRate } from '@/lib/pricing-rules';
 import { computeAdjusted, loadOwnerPricing } from '@/lib/owner-pricing';
+import { loadPropertyPricing, computeQuote } from '@/lib/pricing';
 import { newUniqueReference } from '@/lib/reference';
 import { logComms } from '@/lib/comms';
 import { splitEligible } from '@/lib/finalize';
@@ -58,7 +59,19 @@ export async function approveBooking(bookingId: string): Promise<ActionResult> {
       });
     });
 
-    await sendTemplate(booking.client.email, approvedFinalize(toEmailBooking(booking, booking.client)), notifyEmails()[0]);
+    // "You're saving ~$X vs Airbnb" line (skipped for owner-set prices).
+    let savings: number | null = null;
+    if (!booking.priceCustom) {
+      const lp = await loadPropertyPricing(DEFAULT_SLUG);
+      if (lp) {
+        const q = computeQuote(lp.pricing, {
+          checkIn: toKey(booking.stayCheckIn ?? booking.checkIn), checkOut: toKey(booking.stayCheckOut ?? booking.checkOut),
+          guests: booking.guests, pet: booking.petFee > 0, method: 'ach', compNights: booking.compNights,
+        });
+        if (q.ok) savings = q.savings ?? null;
+      }
+    }
+    await sendTemplate(booking.client.email, { ...approvedFinalize({ ...toEmailBooking(booking, booking.client), savings }) }, notifyEmails()[0]);
     await logComms(booking.clientId, CommsType.EMAIL, 'approved-finalize');
 
     revalidatePath('/owner');
@@ -247,6 +260,50 @@ export async function markAchReturned(bookingId: string): Promise<ActionResult> 
   }
 }
 
+/** Commission + direct-rate settings. Changes affect FUTURE quotes only —
+ * existing bookings keep their frozen snapshots. */
+export async function saveCommissionSettings(input: { commissionPercent: number; directRateUplift: number; airbnbFeePct: number }): Promise<ActionResult> {
+  try {
+    await requireOwner();
+    const ok = (n: number, lo: number, hi: number) => Number.isFinite(n) && n >= lo && n <= hi;
+    if (!ok(input.commissionPercent, 0, 50)) return { ok: false, error: 'Commission must be 0–50%.' };
+    if (!ok(input.directRateUplift, 0, 50)) return { ok: false, error: 'Rate uplift must be 0–50%.' };
+    if (!ok(input.airbnbFeePct, 0, 30)) return { ok: false, error: 'Airbnb fee estimate must be 0–30%.' };
+    await prisma.property.update({
+      where: { slug: DEFAULT_SLUG },
+      data: { commissionPercent: input.commissionPercent, directRateUplift: input.directRateUplift, airbnbFeePct: input.airbnbFeePct },
+    });
+    revalidatePath('/owner/settings');
+    revalidatePath('/owner/calendar');
+    return { ok: true };
+  } catch (e) {
+    return { ok: false, error: (e as Error).message };
+  }
+}
+
+/** Mark a month's management commission settled (or not) — the Jacob↔Mike transfer. */
+export async function settleCommissionMonth(monthKey: string, settled: boolean): Promise<ActionResult> {
+  try {
+    await requireOwner();
+    const m = /^(\d{4})-(\d{2})$/.exec(monthKey);
+    if (!m) return { ok: false, error: 'bad_month' };
+    const start = parseKey(`${monthKey}-01`);
+    const end = new Date(Date.UTC(Number(m[1]), Number(m[2]), 1));
+    await prisma.booking.updateMany({
+      where: {
+        status: { in: [BookingStatus.PAID, BookingStatus.PARTIALLY_PAID] },
+        checkIn: { gte: start, lt: end },
+        commissionAmount: { gt: 0 },
+      },
+      data: { commissionSettled: settled },
+    });
+    revalidatePath('/owner/ledger');
+    return { ok: true };
+  } catch (e) {
+    return { ok: false, error: (e as Error).message };
+  }
+}
+
 /** Save the returned-payment (NSF) fee — Settings, no deploy needed. */
 export async function saveNsfFee(amount: number): Promise<ActionResult> {
   try {
@@ -359,12 +416,17 @@ export async function adjustBookingPrice(input: AdjustPriceInput): Promise<Actio
       taxPercent: op.taxPercent,
     });
 
+    // Commission re-snapshots with the price (still pre-payment) — keep the
+    // booking's frozen % if it has one, else the property's current rate.
+    const pct = b.commissionPercent > 0 ? b.commissionPercent : op.commissionPercent;
+    const commissionBase = Math.round((money.subtotal - money.discount + b.cleaningFee + b.petFee) * 100) / 100;
     const offerSplit = b.depositAmount != null || b.balanceAmount != null;
     await prisma.booking.update({
       where: { id: b.id },
       data: {
         subtotal: money.subtotal, discount: money.discount, taxAmount: money.taxAmount,
         total: money.total, priceCustom: true,
+        commissionPercent: pct, commissionBase, commissionAmount: Math.round(commissionBase * pct) / 100,
         // Re-derive the persisted 50/50 offer from the new total.
         depositAmount: offerSplit ? Math.round((money.total / 2) * 100) / 100 : null,
         balanceAmount: offerSplit ? Math.round((money.total - money.total / 2) * 100) / 100 : null,
@@ -423,6 +485,7 @@ export async function createManualBooking(input: ManualBookingInput): Promise<Ac
         update: { firstName: input.firstName.trim(), lastName: input.lastName.trim(), phone: input.phone?.trim() || undefined },
         create: { email: input.email.toLowerCase().trim(), firstName: input.firstName.trim(), lastName: input.lastName.trim(), phone: input.phone?.trim() || null },
       });
+      const commissionBase = Math.round((money.subtotal - money.discount + cleaningFee) * 100) / 100;
       const created = await tx.booking.create({
         data: {
           reference: await newUniqueReference(tx),
@@ -434,6 +497,8 @@ export async function createManualBooking(input: ManualBookingInput): Promise<Ac
           subtotal: money.subtotal, cleaningFee, petFee: 0,
           discount: money.discount, taxAmount: money.taxAmount, cardFee: 0,
           total: money.total, priceCustom: true,
+          commissionPercent: op.commissionPercent, commissionBase,
+          commissionAmount: Math.round(commissionBase * op.commissionPercent) / 100,
           status: markPaid ? BookingStatus.PAID : BookingStatus.APPROVED,
           balancePaid: markPaid,
           // A generous week-long hold — this guest was invited, not queued.

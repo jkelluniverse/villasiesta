@@ -211,6 +211,16 @@ form.req .btn-navy{width:100%;margin-top:6px}
 .iach-grid input:focus,.iach-grid select:focus{outline:2px solid var(--navy);outline-offset:1px}
 .iach-err{font-size:.78rem;color:#9c4a46;margin-top:5px;line-height:1.5}
 .iach-ok{color:#2C6E52;font-weight:700}
+
+/* 7-night special-rate reservations */
+.day.comp{background:#f2ecdf !important;position:relative}
+.day.comp::after{content:'✦';position:absolute;right:4px;top:3px;font-size:.55rem;color:#B79175}
+.comp-note{background:#FBF7F0;border:1px solid #EAE3D6;border-radius:10px;padding:12px 14px;margin-top:12px;font-size:.82rem;line-height:1.6;color:var(--ink)}
+.comp-flip{display:block;margin-top:8px;background:none;border:0;padding:0;color:var(--navy);font:inherit;font-size:.8rem;font-weight:600;cursor:pointer;text-decoration:underline}
+
+/* savings vs Airbnb chip */
+.save-chip{background:#E7F1EB;border:1px solid #2C6E52;color:#2C6E52;border-radius:10px;padding:10px 14px;margin:10px 0 4px;font-size:.84rem;line-height:1.5}
+.save-chip b{color:#1d5940}
 .iach-check{width:100%;height:auto;border:1px solid var(--line,#e2ddd2);border-radius:10px;margin:4px 0 16px}
 .iach-consent{display:flex;gap:10px;align-items:flex-start;background:var(--gray,#f4f1ea);border-radius:10px;padding:12px 14px;margin-bottom:10px;font-size:.85rem;line-height:1.55;color:var(--ink);cursor:pointer}
 .iach-consent input{margin-top:3px;flex:none;width:16px;height:16px}

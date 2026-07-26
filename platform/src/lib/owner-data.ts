@@ -18,9 +18,10 @@ export type Dashboard = {
   emptyState: string | null;
 };
 
-// Owner net for a booking: gross(total) − processing(card) − cleaning(passthrough) − tax(remitted).
-function netOf(b: { total: number; cleaningFee: number; taxAmount: number; cardFee: number }): number {
-  return Math.round(b.total - b.cleaningFee - b.taxAmount - b.cardFee);
+// Owner net: gross − processing − tax (remitted) − management commission.
+// Same waterfall as the ledger (cleaning stays inside gross).
+function netOf(b: { total: number; taxAmount: number; cardFee: number; commissionAmount: number }): number {
+  return Math.round(b.total - b.cardFee - b.taxAmount - b.commissionAmount);
 }
 
 const monthLabel = (d: Date) => d.toLocaleString('en-US', { month: 'short' });

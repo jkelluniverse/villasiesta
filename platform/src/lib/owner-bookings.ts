@@ -10,6 +10,7 @@ import { toKey, todayKey } from './dates';
 export type BookingRow = {
   id: string;
   reference: string;
+  compNights: number;
   guestName: string;
   email: string;
   phone: string | null;
@@ -45,6 +46,7 @@ export async function listBookings(slug: string): Promise<BookingRow[]> {
     return {
       id: b.id,
       reference: b.reference,
+      compNights: b.compNights,
       guestName: `${b.client.firstName} ${b.client.lastName}`.trim(),
       email: b.client.email,
       phone: b.client.phone,
@@ -131,6 +133,9 @@ export type BookingDetail = {
   total: number;
   priceCustom: boolean;
   taxPercent: number;
+  compNights: number;
+  stayCheckOut: string | null;
+  commissionAmount: number;
   balanceDueDate: string | null;
   holdExpiresAt: string | null;
   createdAt: string;
@@ -267,6 +272,9 @@ export async function getBookingDetail(id: string): Promise<BookingDetail | null
     total: b.total,
     priceCustom: b.priceCustom,
     taxPercent: await taxPercentFor(b.propertyId),
+    compNights: b.compNights,
+    stayCheckOut: b.stayCheckOut ? toKey(b.stayCheckOut) : null,
+    commissionAmount: b.commissionAmount,
     balanceDueDate: b.balanceDueDate ? toKey(b.balanceDueDate) : null,
     holdExpiresAt: b.holdExpiresAt ? b.holdExpiresAt.toISOString() : null,
     createdAt: b.createdAt.toISOString(),

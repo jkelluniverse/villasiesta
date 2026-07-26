@@ -99,10 +99,21 @@ type B = {  // minimal booking shape the templates need
   id: string; reference?: string; firstName: string; checkIn: Date | string; checkOut: Date | string;
   nights: number; guests: number; total: number;
   depositAmount?: number | null; balanceAmount?: number | null; balanceDueDate?: Date | string | null;
+  savings?: number | null;                     // ~$ saved vs booking the same dates on Airbnb
+  stayCheckOut?: Date | string | null;         // 7-night special-rate stays: the guest's own departure
+  compNights?: number;
 };
 
 /** A "Reference" row for the top of any detail card (omitted if absent). */
 const refRow = (b: B): [string, string][] => (b.reference ? [['Reference', b.reference]] : []);
+
+/** "Your stay" row for 7-night special-rate reservations (omitted otherwise). */
+const stayRow = (b: B): [string, string][] =>
+  (b.compNights && b.stayCheckOut ? [['Your stay', `${fmtDate(b.checkIn)} → ${fmtDate(b.stayCheckOut)} · ${b.compNights} complimentary night${b.compNights === 1 ? '' : 's'} included`]] : []);
+
+/** "You're saving ~$X vs Airbnb" paragraph (omitted when no positive savings). */
+const savingsPara = (b: B): string =>
+  (b.savings && b.savings > 0 ? para(`You're saving <b style="color:${INK}">~${fmtUSD(b.savings)}</b> vs. booking the same dates on Airbnb.`) : '');
 
 export function requestReceived(b: B) {
   const subject = "We got your Villa Siesta request";
@@ -112,9 +123,11 @@ export function requestReceived(b: B) {
     title: `Your request is in, ${b.firstName}.`,
     bodyHtml:
       para(`We've sent it to the owner. You'll get an email the moment it's approved — <b style="color:${INK}">nothing has been charged.</b> The owner typically responds within 24–48 hours.`) +
+      savingsPara(b) +
       detailCard([
         ...refRow(b),
-        ["Dates", `${fmtDate(b.checkIn)} → ${fmtDate(b.checkOut)}`],
+        ["Reservation", `${fmtDate(b.checkIn)} → ${fmtDate(b.checkOut)}`],
+        ...stayRow(b),
         ["Nights", String(b.nights)], ["Guests", String(b.guests)],
         ["Estimated total", fmtUSD(b.total)],
       ]),
@@ -131,9 +144,11 @@ export function approvedFinalize(b: B) {
     title: "Good news — your dates are yours to take.",
     bodyHtml:
       para(`The owner approved your request and is holding your dates. Complete payment to confirm your reservation.`) +
+      savingsPara(b) +
       detailCard([
         ...refRow(b),
-        ["Dates", `${fmtDate(b.checkIn)} → ${fmtDate(b.checkOut)}`],
+        ["Reservation", `${fmtDate(b.checkIn)} → ${fmtDate(b.checkOut)}`],
+        ...stayRow(b),
         ["Total", fmtUSD(b.total)],
       ]),
     cta: { label: "Finalize your booking", url: `${SITE}/booking/${b.id}` },
@@ -210,7 +225,7 @@ export function arrivalInfo(b: B, p: {
       detailCard([
         ...refRow(b),
         ["Check-in", `${fmtDate(b.checkIn)} · after ${p.checkinTime}`],
-        ["Check-out", `${fmtDate(b.checkOut)} · by ${p.checkoutTime}`],
+        ["Check-out", `${fmtDate(b.stayCheckOut ?? b.checkOut)} · by ${p.checkoutTime}`],
         ["Address", p.address],
         ["Door code", `<b style="font-size:16px;letter-spacing:.06em;">${p.doorCode}</b>`],
         ["Wi-Fi", `${p.wifiName} · ${p.wifiPassword}`],

@@ -39,7 +39,9 @@ export default async function BookingDetailPage({ params }: { params: { id: stri
           <StatusPill status={b.status} />
         </div>
         <div className="op-note num" style={{ marginTop: 4 }}>
-          {niceDay(b.checkIn)} → {niceDay(b.checkOut)} · {b.nights} nt · {b.guests} guest{b.guests === 1 ? '' : 's'}
+          {b.compNights > 0 && b.stayCheckOut
+            ? <>Booked {niceDay(b.checkIn)} → {niceDay(b.checkOut)} · staying through {niceDay(b.stayCheckOut)} <span className="bk-comp">7-night comp · {b.compNights} free night{b.compNights === 1 ? '' : 's'}</span></>
+            : <>{niceDay(b.checkIn)} → {niceDay(b.checkOut)} · {b.nights} nt · {b.guests} guest{b.guests === 1 ? '' : 's'}</>}
         </div>
 
         {/* status banner — one sentence: where does this stand */}
@@ -139,6 +141,7 @@ export default async function BookingDetailPage({ params }: { params: { id: stri
               <div className="bd-line"><span className="k">Payment plan</span><span className="v">{b.planLabel}</span></div>
               <div className="bd-line"><span className="k">Method</span><span className="v">{b.paymentMethod || '—'}</span></div>
               {b.balanceDueDate ? <div className="bd-line"><span className="k">Balance date</span><span className="v num">{niceDay(b.balanceDueDate)}</span></div> : null}
+              {b.commissionAmount > 0 ? <div className="bd-line"><span className="k">Mgmt commission</span><span className="v num">{money(b.commissionAmount)}</span></div> : null}
               <div className="bd-line"><span className="k">Requested</span><span className="v num">{niceDate(b.createdAt)}</span></div>
             </div>
           </div>

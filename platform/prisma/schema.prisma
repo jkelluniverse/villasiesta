@@ -54,6 +54,10 @@ model Property {
   houseRules     String[]
   autoArrival    Boolean  @default(true)   // auto-send arrival email 3 days before check-in
   nsfFee         Float    @default(55)     // returned-ACH fee (⚠ confirm state-law cap before changing)
+  // Management commission + direct-rate model (back-office; never a guest line item)
+  commissionPercent Float @default(9)      // Jacob's management commission on booking revenue
+  directRateUplift  Float @default(7)      // % added to base rates → the advertised direct rate
+  airbnbFeePct      Float @default(14.5)   // assumed Airbnb guest service fee, for the savings estimate
   createdAt      DateTime @default(now())
 
   photos       Photo[]
@@ -89,6 +93,7 @@ model PricingRule {
   startDate  DateTime?   // for CUSTOM / BLACKOUT / MIN_NIGHTS
   endDate    DateTime?   // checkout-exclusive
   value      Int?        // nightly rate, or min-nights
+  upliftExempt Boolean   @default(false)  // CUSTOM only: advertise this price as-is, no direct-rate uplift
   note       String?
   property   Property    @relation(fields: [propertyId], references: [id], onDelete: Cascade)
 
@@ -171,6 +176,16 @@ model Booking {
   cardFee        Float          @default(0)
   total          Float
   priceCustom    Boolean        @default(false) // owner set/adjusted the price — payment paths use the STORED money, never recompute from rules
+  // Management-commission snapshot (frozen at creation; rate changes are never retroactive)
+  commissionPercent Float       @default(0)
+  commissionBase    Float       @default(0)     // subtotal − discount + cleaning + pet (no tax, no card pass-through)
+  commissionAmount  Float       @default(0)
+  commissionSettled Boolean     @default(false) // owner↔manager transfer marked done
+  // 7-night compliance stays: checkIn/checkOut = the full reservation;
+  // stay* = the nights the guest intends to use; compNights = the difference.
+  stayCheckIn    DateTime?      @db.Date
+  stayCheckOut   DateTime?      @db.Date
+  compNights     Int            @default(0)
   status         BookingStatus  @default(REQUESTED)
   paymentMethod  PaymentMethod?
   paymentPlan    PaymentPlan    @default(FULL)
