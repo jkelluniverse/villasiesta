@@ -36,6 +36,9 @@ export default function CalendarGrid({ cal, isOwner }: { cal: CalendarMonth; isO
     if (c.occ === 'owner') { setConfirmBlock(c); setSel(null); return; }
     if (c.occ === 'airbnb') { setErr('Airbnb-synced dates are managed on Airbnb.'); return; }
     setConfirmBlock(null);
+    // Touch-friendly: a second tap after a single-day selection completes the
+    // range (no drag needed on phones). Tapping earlier restarts the selection.
+    if (sel && sel.a === sel.b && c.key > sel.a) { setSel({ a: sel.a, b: c.key }); return; }
     setSel({ a: c.key, b: c.key });
     setDragging(true);
   };

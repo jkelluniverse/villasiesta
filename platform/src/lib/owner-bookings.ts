@@ -9,6 +9,7 @@ import { toKey, todayKey } from './dates';
 // ------------------------------------------------------------------ list
 export type BookingRow = {
   id: string;
+  source: 'direct' | 'airbnb';   // airbnb rows come from the iCal sync (dates only)
   reference: string;
   compNights: number;
   guestName: string;
@@ -36,15 +37,25 @@ function paidOf(b: { status: BookingStatus; total: number; depositAmount: number
 export async function listBookings(slug: string): Promise<BookingRow[]> {
   const property = await prisma.property.findUnique({ where: { slug }, select: { id: true } });
   if (!property) return [];
-  const bookings = await prisma.booking.findMany({
-    where: { propertyId: property.id },
-    include: { client: true },
-    orderBy: { checkIn: 'desc' },
-  });
-  return bookings.map((b) => {
+  const [bookings, airbnbBlocks] = await Promise.all([
+    prisma.booking.findMany({
+      where: { propertyId: property.id },
+      include: { client: true },
+      orderBy: { checkIn: 'desc' },
+    }),
+    // Airbnb reservations, as synced from the iCal feed — dates only (Airbnb
+    // shares no guest details or amounts through calendar export).
+    prisma.calendarBlock.findMany({
+      where: { propertyId: property.id, source: 'AIRBNB' },
+      orderBy: { startDate: 'desc' },
+    }),
+  ]);
+
+  const rows: BookingRow[] = bookings.map((b) => {
     const paidAmount = paidOf(b);
     return {
       id: b.id,
+      source: 'direct' as const,
       reference: b.reference,
       compNights: b.compNights,
       guestName: `${b.client.firstName} ${b.client.lastName}`.trim(),
@@ -62,6 +73,26 @@ export async function listBookings(slug: string): Promise<BookingRow[]> {
       createdAt: b.createdAt.toISOString(),
     };
   });
+
+  for (const blk of airbnbBlocks) {
+    const ci = toKey(blk.startDate), co = toKey(blk.endDate);
+    rows.push({
+      id: `airbnb_${blk.id}`,
+      source: 'airbnb',
+      reference: 'Airbnb',
+      compNights: 0,
+      guestName: blk.summary && blk.summary.toLowerCase() !== 'airbnb' ? blk.summary : 'Airbnb reservation',
+      email: '', phone: null,
+      checkIn: ci, checkOut: co,
+      nights: Math.max(1, Math.round((Date.parse(co) - Date.parse(ci)) / 864e5)),
+      guests: 0, total: 0,
+      status: BookingStatus.PAID,   // display only; airbnb rows render their own pill
+      paidAmount: 0, paidPct: 0, balanceDueDate: null,
+      createdAt: blk.createdAt.toISOString(),
+    });
+  }
+
+  return rows.sort((a, b) => (a.checkIn < b.checkIn ? 1 : -1));
 }
 
 export type BookingTab = 'upcoming' | 'requests' | 'past' | 'all';

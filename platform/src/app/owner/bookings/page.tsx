@@ -68,6 +68,20 @@ export default async function BookingsPage({ searchParams }: { searchParams: { t
 }
 
 function Row({ r }: { r: BookingRow }) {
+  // Airbnb reservations (from the iCal sync): dates only — Airbnb shares no
+  // guest details or amounts. They link to that month on the calendar.
+  if (r.source === 'airbnb') {
+    return (
+      <Link href={`/owner/calendar?m=${r.checkIn.slice(0, 7)}`} className="bk-row">
+        <div className="who">{r.guestName}<small className="bk-ref">booked on Airbnb</small></div>
+        <div className="sub num">{niceRange(r.checkIn, r.checkOut)}<br /><span style={{ color: 'var(--ink3)' }}>{r.nights} nt</span></div>
+        <div className="sub num">—</div>
+        <div><span className="pill airbnb">Airbnb</span></div>
+        <div className="amt"><small>Paid via Airbnb</small></div>
+      </Link>
+    );
+  }
+
   const progress =
     r.status === 'PAID' ? `${money(r.total)} of ${money(r.total)} ✓` :
     r.status === 'PARTIALLY_PAID' ? `${money(r.paidAmount)} of ${money(r.total)}` :

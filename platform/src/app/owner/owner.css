@@ -133,10 +133,10 @@
 @media(max-width:860px){.bd-grid{grid-template-columns:1fr}}
 .bd-card{background:var(--surface);border-radius:20px;box-shadow:var(--shadow-1),var(--shadow-2);padding:22px}
 .bd-card h2{font-size:1rem;font-weight:600;margin-bottom:14px}
-.bd-line{display:flex;justify-content:space-between;gap:12px;padding:9px 0;border-bottom:1px solid var(--hairline);font-size:.9rem}
+.bd-line{display:flex;justify-content:space-between;flex-wrap:wrap;gap:4px 12px;padding:9px 0;border-bottom:1px solid var(--hairline);font-size:.9rem}
 .bd-line:last-child{border-bottom:0}
 .bd-line .k{color:var(--ink2)}
-.bd-line .v{font-weight:500;text-align:right}
+.bd-line .v{font-weight:500;text-align:right;min-width:0;overflow-wrap:anywhere}
 .bd-line.total{font-weight:700}
 .bd-contact-actions{display:flex;gap:8px;margin-top:14px;flex-wrap:wrap}
 .bd-actions{display:flex;gap:8px;flex-wrap:wrap;margin-top:6px}
@@ -146,8 +146,9 @@
 .bd-log .when{color:var(--ink3);white-space:nowrap;min-width:96px}
 .bd-log .what b{font-weight:600}
 .bd-back{display:inline-block;margin-bottom:12px;color:var(--ink2);font-size:.85rem;text-decoration:none}
-.bd-pay{border:1px solid var(--hairline);border-radius:12px;padding:14px;margin-top:10px;font-size:.86rem}
-.bd-pay .row{display:flex;justify-content:space-between;padding:3px 0;gap:12px}
+.bd-pay{border:1px solid var(--hairline);border-radius:12px;padding:14px;margin-top:10px;font-size:.86rem;min-width:0}
+.bd-pay .row{display:flex;justify-content:space-between;flex-wrap:wrap;padding:3px 0;gap:2px 12px;min-width:0}
+.bd-pay .row>*{min-width:0;overflow-wrap:anywhere;word-break:break-word}
 .bd-pay .muted{color:var(--ink3)}
 
 /* arrival editor */
@@ -239,4 +240,63 @@
 .lg-dot.ok{background:var(--jade)}
 .lg-dot.due{background:var(--topaz)}
 .bk-comp{display:inline-block;font-size:.64rem;font-weight:700;letter-spacing:.04em;background:#FBF7F0;color:#8A6B1E;border:1px solid #EAE3D6;border-radius:999px;padding:2px 8px;margin-left:6px}
+.pill.airbnb{background:#fdf4f5;color:var(--garnet);border:1px solid var(--garnet)}
+
+/* ───────────────────────── mobile-first (phones as a web app) ───────────────────────── */
+.op-tabbar{display:none}
+.op-wrap{overflow-x:clip}
+@media(max-width:720px){
+  /* top bar: brand + sign-out only; sections move to the bottom tab bar */
+  .op-bar{height:56px;padding:0 14px}
+  .op-bar .brand{font-size:.92rem;gap:8px}
+  .op-bar .vsq{width:30px;height:30px;font-size:.75rem}
+  .op-bar .muted{display:none}
+  .op-nav{display:none}
+  .op .signout{padding:6px 12px;font-size:.76rem}
+
+  .op-tabbar{position:fixed;left:0;right:0;bottom:0;z-index:40;display:flex;gap:2px;
+    background:rgba(255,255,255,.96);backdrop-filter:blur(14px);-webkit-backdrop-filter:blur(14px);
+    border-top:1px solid var(--hairline);padding:6px 6px calc(8px + env(safe-area-inset-bottom))}
+  .op-tab{flex:1;display:flex;flex-direction:column;align-items:center;gap:2px;
+    font-size:.62rem;font-weight:600;letter-spacing:.02em;color:var(--ink3);text-decoration:none;
+    padding:5px 0 3px;border-radius:12px;-webkit-tap-highlight-color:transparent}
+  .op-tab .ico{font-size:1.2rem;line-height:1.1;filter:grayscale(1);opacity:.55}
+  .op-tab.on{color:var(--brand);background:var(--sapphire-s)}
+  .op-tab.on .ico{filter:none;opacity:1}
+
+  .op-wrap{padding:18px 14px calc(88px + env(safe-area-inset-bottom))}
+  .op h1{font-size:1.3rem;margin-bottom:14px}
+  .op-figure{font-size:1.55rem}
+  .op-card{border-radius:18px;padding:16px}
+  .op-metrics{gap:10px}
+  .op-lower{gap:12px}
+  .op-row{padding:13px 14px;flex-wrap:wrap}
+  .op-row .acts{width:100%;justify-content:flex-end}
+  .op-attention .head{padding:14px 16px}
+
+  .bd-card{padding:16px;border-radius:18px}
+  .bd-grid{gap:12px;margin-top:14px}
+  .bd-banner{font-size:.85rem;padding:11px 14px;border-radius:12px}
+  .bd-ref{font-size:.72rem}
+  .bd-actions .op-btn,.bd-contact-actions .op-iconbtn{min-height:40px}
+  .op-btn{padding:10px 14px}
+
+  .bk-tabs{gap:5px}
+  .bk-tab{padding:7px 12px;font-size:.8rem}
+  .bk-search{margin-left:0;width:100%}
+  .bk-search input{width:100%;min-width:0}
+  .bk-row{padding:13px 14px}
+
+  .lg-month{padding:14px 16px 10px;flex-wrap:wrap}
+  .lg-table{font-size:.8rem}
+  .lg-table th:first-child,.lg-table td:first-child{padding-left:14px}
+  .lg-table th:last-child,.lg-table td:last-child{padding-right:14px}
+
+  .cal-head{gap:10px}
+  .cal-month{min-width:0;font-size:.92rem}
+  .mp-modal{border-radius:16px;padding:18px;max-height:86vh}
+
+  /* 16px inputs stop iOS from zooming the page on focus */
+  .op input:not([type=checkbox]):not([type=radio]),.op select,.op textarea{font-size:16px}
+}
 @media(max-width:640px){.cal-day{min-height:48px}.cal-tag{display:none}.cal-rate{display:none}}
