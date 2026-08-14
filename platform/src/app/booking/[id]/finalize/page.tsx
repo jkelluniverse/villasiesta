@@ -1,4 +1,5 @@
-import { prisma } from '@/lib/db';
+import { tenantIdFromHeaders } from '@/lib/tenant';
+import { withTenant, db } from '@/lib/dal';
 import { loadPropertyPricing, computeQuote } from '@/lib/pricing';
 import { splitEligible } from '@/lib/finalize';
 import { addDays, toKey, todayKey } from '@/lib/dates';
@@ -17,7 +18,8 @@ export const dynamic = 'force-dynamic';
 const niceDate = (key: string) => { const [y, m, d] = key.split('-').map(Number); return new Date(y, m - 1, d).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }); };
 
 export default async function FinalizePage({ params }: { params: { id: string } }) {
-  const booking = await prisma.booking.findUnique({ where: { id: params.id }, include: { property: true, client: true } });
+  return withTenant(await tenantIdFromHeaders(), async () => {
+  const booking = await db().booking.findUnique({ where: { id: params.id }, include: { property: true, client: true } });
   if (!booking) return <main className="wrap" style={{ padding: '120px 0' }}><h1 className="lead">Booking not found</h1></main>;
 
   if (booking.status === BookingStatus.PAID || booking.status === BookingStatus.PARTIALLY_PAID) {
@@ -108,4 +110,5 @@ export default async function FinalizePage({ params }: { params: { id: string } 
       </div>
     </main>
   );
+});
 }

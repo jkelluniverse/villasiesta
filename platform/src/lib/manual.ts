@@ -1,4 +1,4 @@
-import { prisma } from './db';
+import { db, tid } from './dal';
 import { BookingStatus, BlockSource, PaymentMethod, PaymentPlan, CommsType } from '@prisma/client';
 import { parseKey, toKey, addDays } from './dates';
 import { logComms } from './comms';
@@ -44,11 +44,11 @@ export async function recordManualPayment(input: {
   bookingId: string; method: PaymentMethod; amount: number; receivedAt: Date;
   memo?: string; note?: string; recordedBy: string;
 }): Promise<ManualSettlement> {
-  const b = await prisma.booking.findUnique({ where: { id: input.bookingId }, include: { block: true } });
+  const b = await db().booking.findUnique({ where: { id: input.bookingId }, include: { block: true } });
   if (!b) return { ok: false, error: 'not_found' };
   if (b.status === BookingStatus.CANCELLED || b.status === BookingStatus.EXPIRED) return { ok: false, error: 'booking_closed' };
 
-  const priorManual = await prisma.manualPayment.aggregate({ where: { bookingId: b.id }, _sum: { amount: true } });
+  const priorManual = await db().manualPayment.aggregate({ where: { bookingId: b.id }, _sum: { amount: true } });
   const totalManual = money2((priorManual._sum.amount ?? 0) + input.amount);
   const covered = totalManual + 0.5 >= b.total;                 // ≥ total (cents-fuzzy) → paid in full
   const split = b.paymentPlan === PaymentPlan.SPLIT;
@@ -58,9 +58,10 @@ export async function recordManualPayment(input: {
   const ci = toKey(b.checkIn);
   let nextStatus: BookingStatus = b.status;
 
-  await prisma.$transaction(async (tx) => {
+  await db().$transaction(async (tx) => {
     await tx.manualPayment.create({
       data: {
+        tenantId: tid(),
         bookingId: b.id, method: input.method, amount: money2(input.amount),
         receivedAt: input.receivedAt, memo: input.memo || null, note: input.note || null, recordedBy: input.recordedBy,
       },
@@ -91,7 +92,7 @@ export async function recordManualPayment(input: {
     // Lock the dates once anything is actually paid.
     if ((covered || (split && coversDeposit)) && !b.block) {
       await tx.calendarBlock.create({
-        data: { propertyId: b.propertyId, startDate: parseKey(toKey(b.checkIn)), endDate: parseKey(toKey(b.checkOut)), source: BlockSource.BOOKING, bookingId: b.id, summary: 'Booked (direct)' },
+        data: { tenantId: tid(), propertyId: b.propertyId, startDate: parseKey(toKey(b.checkIn)), endDate: parseKey(toKey(b.checkOut)), source: BlockSource.BOOKING, bookingId: b.id, summary: 'Booked (direct)' },
       });
     }
   });
@@ -102,12 +103,12 @@ export async function recordManualPayment(input: {
 
 /** Guest pressed "I've sent it": record the claim, hold (not lock) the dates. */
 export async function claimManualPayment(bookingId: string, method: PaymentMethod): Promise<{ ok: boolean; error?: string }> {
-  const b = await prisma.booking.findUnique({ where: { id: bookingId } });
+  const b = await db().booking.findUnique({ where: { id: bookingId } });
   if (!b) return { ok: false, error: 'not_found' };
   if (b.status !== BookingStatus.APPROVED && b.status !== BookingStatus.PARTIALLY_PAID) return { ok: false, error: 'not_claimable' };
   // Extend the hold by 2 days so it doesn't expire while we verify — but do NOT
   // lock the calendar; only the owner recording the payment does that.
   const hold = new Date(Date.now() + CLAIM_HOLD_DAYS * 864e5);
-  await prisma.booking.update({ where: { id: bookingId }, data: { manualClaimApp: method, manualClaimAt: new Date(), holdExpiresAt: hold } });
+  await db().booking.update({ where: { id: bookingId }, data: { manualClaimApp: method, manualClaimAt: new Date(), holdExpiresAt: hold } });
   return { ok: true };
 }

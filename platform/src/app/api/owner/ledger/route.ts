@@ -1,4 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { resolveTenantId } from '@/lib/tenant';
+import { withTenant } from '@/lib/dal';
 import { getServerSession } from 'next-auth';
 import { authOptions } from '@/lib/auth';
 import { DEFAULT_SLUG } from '@/lib/property';
@@ -8,6 +10,7 @@ export const dynamic = 'force-dynamic';
 
 /** Download a year's ledger as CSV (opens in Excel/Sheets). Session-gated. */
 export async function GET(req: NextRequest) {
+  return withTenant(await resolveTenantId(req.headers.get('host')), async () => {
   const session = await getServerSession(authOptions);
   if (!session?.user) return NextResponse.json({ error: 'unauthorized' }, { status: 401 });
 
@@ -21,4 +24,5 @@ export async function GET(req: NextRequest) {
       'Content-Disposition': `attachment; filename="villa-siesta-ledger-${ledger.year}.csv"`,
     },
   });
+});
 }

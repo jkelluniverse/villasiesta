@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { WebhooksHelper } from 'square';
 import { prisma } from '@/lib/db';
+import { withTenant, db, tid } from '@/lib/dal';
 import { BookingStatus, BlockSource } from '@prisma/client';
 import { parseKey, toKey } from '@/lib/dates';
 import { sendEmail, sendTemplate, notifyEmails } from '@/lib/email';
@@ -47,6 +48,8 @@ export async function POST(req: NextRequest) {
   if (!booking && orderId) booking = await prisma.booking.findFirst({ where: { squareOrderId: orderId }, include: { block: true, client: true } });
   if (!booking) return NextResponse.json({ ok: true, note: 'no matching booking' });
 
+  return withTenant(booking.tenantId, async () => {
+
   // A payment link matched by order id pays whatever is outstanding: the
   // scheduled balance on a split, otherwise the full amount.
   const viaLink = !ref && !!orderId;
@@ -66,7 +69,7 @@ export async function POST(req: NextRequest) {
     // Persist the payment id if we didn't have one (link payments especially).
     const patchPaymentId = payment.id && !booking.squarePaymentId ? { squarePaymentId: payment.id } : {};
 
-    await prisma.$transaction(async (tx) => {
+    await db().$transaction(async (tx) => {
       if (kind === 'balance') {
         if (!booking.balancePaid) await tx.booking.update({ where: { id: booking.id }, data: { balancePaid: true, status: BookingStatus.PAID, ...patchPaymentId } });
       } else if (transitioned) {
@@ -76,7 +79,7 @@ export async function POST(req: NextRequest) {
       }
       if (!booking.block) {
         await tx.calendarBlock.create({
-          data: { propertyId: booking.propertyId, startDate: parseKey(toKey(booking.checkIn)), endDate: parseKey(toKey(booking.checkOut)), source: BlockSource.BOOKING, bookingId: booking.id, summary: 'Booked (direct)' },
+          data: { tenantId: tid(), propertyId: booking.propertyId, startDate: parseKey(toKey(booking.checkIn)), endDate: parseKey(toKey(booking.checkOut)), source: BlockSource.BOOKING, bookingId: booking.id, summary: 'Booked (direct)' },
         });
       }
     });
@@ -99,7 +102,7 @@ export async function POST(req: NextRequest) {
     }
   } else if ((status === 'FAILED' || status === 'CANCELED') && kind !== 'balance') {
     // An ACH deposit/full payment failed or was returned: release the dates.
-    await prisma.$transaction(async (tx) => {
+    await db().$transaction(async (tx) => {
       if (booking.block) await tx.calendarBlock.delete({ where: { bookingId: booking.id } });
       await tx.booking.update({ where: { id: booking.id }, data: { status: BookingStatus.APPROVED, balancePaid: false } });
     });
@@ -114,4 +117,5 @@ export async function POST(req: NextRequest) {
   }
 
   return NextResponse.json({ ok: true });
+  });
 }

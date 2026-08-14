@@ -1,5 +1,5 @@
-import { prisma } from './db';
 import { BlockSource, BookingStatus } from '@prisma/client';
+import { db, tid } from './dal';
 import { displayStatus } from './bookingStatus';
 import { loadPropertyPricing, nightlyRate } from './pricing';
 import { addDays, eachNight, parseKey, toKey, todayKey } from './dates';
@@ -48,7 +48,7 @@ function normalizeMonth(monthKey: string): { year: number; month0: number } {
 }
 
 export async function getCalendarMonth(slug: string, monthKey: string): Promise<CalendarMonth | null> {
-  const property = await prisma.property.findUnique({ where: { slug }, select: { id: true, currency: true, airbnbIcalUrl: true } });
+  const property = await db().property.findFirst({ where: { slug }, select: { id: true, currency: true, airbnbIcalUrl: true } });
   if (!property) return null;
   const loaded = await loadPropertyPricing(slug);
   const pricing = loaded?.pricing;
@@ -69,7 +69,7 @@ export async function getCalendarMonth(slug: string, monthKey: string): Promise<
 
   const now = new Date();
   const [bookings, blocks] = await Promise.all([
-    prisma.booking.findMany({
+    db().booking.findMany({
       where: {
         propertyId: property.id,
         checkIn: { lt: rangeEnd },
@@ -82,7 +82,7 @@ export async function getCalendarMonth(slug: string, monthKey: string): Promise<
       },
       include: { client: true },
     }),
-    prisma.calendarBlock.findMany({
+    db().calendarBlock.findMany({
       where: {
         propertyId: property.id,
         source: { in: [BlockSource.OWNER, BlockSource.AIRBNB] },
@@ -144,7 +144,7 @@ export async function getCalendarMonth(slug: string, monthKey: string): Promise<
   for (let i = 0; i < cells.length; i += 7) weeks.push(cells.slice(i, i + 7));
 
   const lastSync = property.airbnbIcalUrl
-    ? await prisma.syncLog.findFirst({ where: { propertyId: property.id }, orderBy: { ranAt: 'desc' } })
+    ? await db().syncLog.findFirst({ where: { propertyId: property.id }, orderBy: { ranAt: 'desc' } })
     : null;
   const sync: SyncStatus = property.airbnbIcalUrl
     ? { configured: true, status: lastSync?.status ?? 'pending', message: lastSync?.message, ranAt: lastSync?.ranAt.toISOString() }

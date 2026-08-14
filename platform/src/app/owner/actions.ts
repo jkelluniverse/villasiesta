@@ -3,6 +3,8 @@ import { getServerSession } from 'next-auth';
 import { revalidatePath } from 'next/cache';
 import { authOptions } from '@/lib/auth';
 import { prisma } from '@/lib/db';
+import { db, tid, withTenant } from '@/lib/dal';
+import { tenantIdFromHeaders } from '@/lib/tenant';
 import { assertRangeAvailable } from '@/lib/availability';
 import { addDays, nightsBetween, parseKey, toKey } from '@/lib/dates';
 import { sendEmail, sendTemplate, notifyEmails } from '@/lib/email';
@@ -26,16 +28,24 @@ const BALANCE_LEAD_DAYS = 14;
 
 async function requireOwner() {
   const session = await getServerSession(authOptions);
-  if (!session?.user || session.user.role !== 'OWNER') throw new Error('forbidden');
+  if (!session?.user || (session.user.role !== 'OWNER' && session.user.role !== 'ADMIN')) throw new Error('forbidden');
+  // Tenant membership: the signed-in user must belong to the tenant this host
+  // resolves to (platform ADMIN passes everywhere).
+  if (session.user.role !== 'ADMIN') {
+    const user = await prisma.user.findUnique({ where: { email: (session.user.email || '').toLowerCase() }, select: { id: true } });
+    const member = user && await prisma.tenantUser.findUnique({ where: { tenantId_userId: { tenantId: tid(), userId: user.id } }, select: { role: true } });
+    if (!member || member.role !== 'OWNER') throw new Error('forbidden');
+  }
   return session;
 }
 
 export type ActionResult = { ok: boolean; error?: string };
 
 export async function approveBooking(bookingId: string): Promise<ActionResult> {
+  return withTenant(await tenantIdFromHeaders(), async () => {
   try {
     await requireOwner();
-    const booking = await prisma.$transaction(async (tx) => {
+    const booking = await db().$transaction(async (tx) => {
       const b = await tx.booking.findUnique({ where: { id: bookingId }, include: { client: true, property: true } });
       if (!b) throw new Error('not_found');
       if (b.status !== BookingStatus.REQUESTED) throw new Error('not_pending');
@@ -80,13 +90,15 @@ export async function approveBooking(bookingId: string): Promise<ActionResult> {
     const msg = (e as Error).message;
     return { ok: false, error: msg === 'DATES_UNAVAILABLE' ? 'Those dates now conflict with another booking.' : msg };
   }
+});
 }
 
 /** One-click "Send bill": Square payment link for the outstanding amount, emailed + logged. */
 export async function sendBill(bookingId: string): Promise<ActionResult> {
+  return withTenant(await tenantIdFromHeaders(), async () => {
   try {
     await requireOwner();
-    const b = await prisma.booking.findUnique({ where: { id: bookingId }, include: { client: true, property: true } });
+    const b = await db().booking.findUnique({ where: { id: bookingId }, include: { client: true, property: true } });
     if (!b) return { ok: false, error: 'not_found' };
 
     const outstanding = b.status === 'PARTIALLY_PAID' && b.balanceAmount ? b.balanceAmount : b.total;
@@ -99,7 +111,7 @@ export async function sendBill(bookingId: string): Promise<ActionResult> {
 
     // Remember the order so the webhook can reconcile this booking to PAID when
     // the guest pays the link (link payments carry order_id, not reference_id).
-    if (link.orderId) await prisma.booking.update({ where: { id: b.id }, data: { squareOrderId: link.orderId } });
+    if (link.orderId) await db().booking.update({ where: { id: b.id }, data: { squareOrderId: link.orderId } });
 
     await sendEmail({
       to: b.client.email, replyTo: notifyEmails()[0],
@@ -112,18 +124,20 @@ export async function sendBill(bookingId: string): Promise<ActionResult> {
         '', '— Villa Siesta',
       ].join('\n'),
     });
-    await prisma.commsLog.create({ data: { clientId: b.clientId, type: CommsType.BILL, detail: `Square link ${link.url} for ${outstanding}` } });
+    await db().commsLog.create({ data: { tenantId: tid(), clientId: b.clientId, type: CommsType.BILL, detail: `Square link ${link.url} for ${outstanding}` } });
     revalidatePath('/owner');
     return { ok: true };
   } catch (e) {
     return { ok: false, error: (e as Error).message };
   }
+});
 }
 
 export async function declineBooking(bookingId: string): Promise<ActionResult> {
+  return withTenant(await tenantIdFromHeaders(), async () => {
   try {
     await requireOwner();
-    const b = await prisma.booking.update({
+    const b = await db().booking.update({
       where: { id: bookingId },
       data: { status: BookingStatus.CANCELLED },
       include: { client: true, property: true },
@@ -136,6 +150,7 @@ export async function declineBooking(bookingId: string): Promise<ActionResult> {
   } catch (e) {
     return { ok: false, error: (e as Error).message };
   }
+});
 }
 
 export type RecordManualInput = {
@@ -145,6 +160,7 @@ export type RecordManualInput = {
 
 /** Owner records a received transfer-app payment; runs settlement + emails. */
 export async function recordManualPaymentAction(input: RecordManualInput): Promise<ActionResult> {
+  return withTenant(await tenantIdFromHeaders(), async () => {
   try {
     const session = await requireOwner();
     const recorder = await prisma.user.findUnique({ where: { email: (session.user?.email || '').toLowerCase() }, select: { id: true } });
@@ -157,14 +173,14 @@ export async function recordManualPaymentAction(input: RecordManualInput): Promi
 
     // A recorded bank debit settles the ACH mandate (purge cron keys off settledAt).
     if (input.method === 'ACH_DIRECT') {
-      await prisma.achAuthorization.updateMany({
+      await db().achAuthorization.updateMany({
         where: { bookingId: input.bookingId, status: { in: ['authorized', 'originated'] } },
         data: { status: 'settled', settledAt: new Date() },
       });
     }
 
     // Settlement emails mirror the Square path.
-    const b = await prisma.booking.findUnique({ where: { id: input.bookingId }, include: { client: true } });
+    const b = await db().booking.findUnique({ where: { id: input.bookingId }, include: { client: true } });
     if (b) {
       const eb = toEmailBooking(b, b.client);
       const owners = notifyEmails();
@@ -185,6 +201,7 @@ export async function recordManualPaymentAction(input: RecordManualInput): Promi
   } catch (e) {
     return { ok: false, error: (e as Error).message };
   }
+});
 }
 
 export type RevealedAch = {
@@ -195,9 +212,10 @@ export type RevealedAch = {
 /** THE one place full bank numbers are decrypted — owner-only, audit-logged
  * to CommsLog on every call, and marks the mandate as being originated. */
 export async function revealAchDetails(bookingId: string): Promise<RevealedAch> {
+  return withTenant(await tenantIdFromHeaders(), async () => {
   try {
     const session = await requireOwner();
-    const auth = await prisma.achAuthorization.findFirst({
+    const auth = await db().achAuthorization.findFirst({
       where: { bookingId, encBlob: { not: '' } },
       orderBy: { consentAt: 'desc' },
       include: { booking: { select: { clientId: true, reference: true } } },
@@ -205,27 +223,29 @@ export async function revealAchDetails(bookingId: string): Promise<RevealedAch> 
     if (!auth) return { ok: false, error: 'No bank details on file (or already purged).' };
     const details = decryptBankDetails(auth.encBlob);
     await logComms(auth.booking.clientId, CommsType.BILL, `ACH details revealed for origination (${auth.booking.reference}) by ${session.user?.email || 'owner'}`);
-    if (auth.status === 'authorized') await prisma.achAuthorization.update({ where: { id: auth.id }, data: { status: 'originated' } });
+    if (auth.status === 'authorized') await db().achAuthorization.update({ where: { id: auth.id }, data: { status: 'originated' } });
     return { ok: true, nameOnAccount: auth.nameOnAccount, bankName: auth.bankName, routing: details.routing, account: details.account, type: details.type };
   } catch (e) {
     return { ok: false, error: (e as Error).message };
   }
+});
 }
 
 /** ACH debit came back (NSF/returned): flag it, add the returned-payment fee
  * to the amount due, email the guest. Dates are NOT released automatically. */
 export async function markAchReturned(bookingId: string): Promise<ActionResult> {
+  return withTenant(await tenantIdFromHeaders(), async () => {
   try {
     await requireOwner();
-    const b = await prisma.booking.findUnique({ where: { id: bookingId }, include: { client: true, property: true } });
+    const b = await db().booking.findUnique({ where: { id: bookingId }, include: { client: true, property: true } });
     if (!b) return { ok: false, error: 'not_found' };
-    const auth = await prisma.achAuthorization.findFirst({ where: { bookingId }, orderBy: { consentAt: 'desc' } });
+    const auth = await db().achAuthorization.findFirst({ where: { bookingId }, orderBy: { consentAt: 'desc' } });
     if (!auth) return { ok: false, error: 'No ACH authorization on this booking.' };
     if (auth.status === 'returned') return { ok: false, error: 'Already marked returned.' };
 
     const fee = b.property.nsfFee;
     const money2 = (n: number) => Math.round(n * 100) / 100;
-    await prisma.$transaction(async (tx) => {
+    await db().$transaction(async (tx) => {
       await tx.achAuthorization.update({ where: { id: auth.id }, data: { status: 'returned', settledAt: null } });
       await tx.booking.update({
         where: { id: bookingId },
@@ -258,18 +278,20 @@ export async function markAchReturned(bookingId: string): Promise<ActionResult> 
   } catch (e) {
     return { ok: false, error: (e as Error).message };
   }
+});
 }
 
 /** Commission + direct-rate settings. Changes affect FUTURE quotes only —
  * existing bookings keep their frozen snapshots. */
 export async function saveCommissionSettings(input: { commissionPercent: number; directRateUplift: number; airbnbFeePct: number }): Promise<ActionResult> {
+  return withTenant(await tenantIdFromHeaders(), async () => {
   try {
     await requireOwner();
     const ok = (n: number, lo: number, hi: number) => Number.isFinite(n) && n >= lo && n <= hi;
     if (!ok(input.commissionPercent, 0, 50)) return { ok: false, error: 'Commission must be 0–50%.' };
     if (!ok(input.directRateUplift, 0, 50)) return { ok: false, error: 'Rate uplift must be 0–50%.' };
     if (!ok(input.airbnbFeePct, 0, 30)) return { ok: false, error: 'Airbnb fee estimate must be 0–30%.' };
-    await prisma.property.update({
+    await db().property.updateMany({
       where: { slug: DEFAULT_SLUG },
       data: { commissionPercent: input.commissionPercent, directRateUplift: input.directRateUplift, airbnbFeePct: input.airbnbFeePct },
     });
@@ -279,17 +301,19 @@ export async function saveCommissionSettings(input: { commissionPercent: number;
   } catch (e) {
     return { ok: false, error: (e as Error).message };
   }
+});
 }
 
 /** Mark a month's management commission settled (or not) — the Jacob↔Mike transfer. */
 export async function settleCommissionMonth(monthKey: string, settled: boolean): Promise<ActionResult> {
+  return withTenant(await tenantIdFromHeaders(), async () => {
   try {
     await requireOwner();
     const m = /^(\d{4})-(\d{2})$/.exec(monthKey);
     if (!m) return { ok: false, error: 'bad_month' };
     const start = parseKey(`${monthKey}-01`);
     const end = new Date(Date.UTC(Number(m[1]), Number(m[2]), 1));
-    await prisma.booking.updateMany({
+    await db().booking.updateMany({
       where: {
         status: { in: [BookingStatus.PAID, BookingStatus.PARTIALLY_PAID] },
         checkIn: { gte: start, lt: end },
@@ -302,27 +326,31 @@ export async function settleCommissionMonth(monthKey: string, settled: boolean):
   } catch (e) {
     return { ok: false, error: (e as Error).message };
   }
+});
 }
 
 /** Save the returned-payment (NSF) fee — Settings, no deploy needed. */
 export async function saveNsfFee(amount: number): Promise<ActionResult> {
+  return withTenant(await tenantIdFromHeaders(), async () => {
   try {
     await requireOwner();
     if (!Number.isFinite(amount) || amount < 0 || amount > 500) return { ok: false, error: 'Enter a fee between 0 and 500.' };
-    await prisma.property.update({ where: { slug: DEFAULT_SLUG }, data: { nsfFee: Math.round(amount * 100) / 100 } });
+    await db().property.updateMany({ where: { slug: DEFAULT_SLUG }, data: { nsfFee: Math.round(amount * 100) / 100 } });
     revalidatePath('/owner/settings');
     return { ok: true };
   } catch (e) {
     return { ok: false, error: (e as Error).message };
   }
+});
 }
 
 /** Manual reconcile: mark an approved/partial booking as fully paid (payment
  * collected off-platform, or a Square link that never reconciled). Locks dates. */
 export async function markPaid(bookingId: string): Promise<ActionResult> {
+  return withTenant(await tenantIdFromHeaders(), async () => {
   try {
     await requireOwner();
-    await prisma.$transaction(async (tx) => {
+    await db().$transaction(async (tx) => {
       const b = await tx.booking.findUnique({ where: { id: bookingId }, include: { block: true } });
       if (!b) throw new Error('not_found');
       if (b.status === BookingStatus.PAID) return;
@@ -330,11 +358,11 @@ export async function markPaid(bookingId: string): Promise<ActionResult> {
       await tx.booking.update({ where: { id: bookingId }, data: { status: BookingStatus.PAID, balancePaid: true, holdExpiresAt: null } });
       if (!b.block) {
         await tx.calendarBlock.create({
-          data: { propertyId: b.propertyId, startDate: parseKey(toKey(b.checkIn)), endDate: parseKey(toKey(b.checkOut)), source: 'BOOKING', bookingId: b.id, summary: 'Booked (direct)' },
+          data: { tenantId: tid(), propertyId: b.propertyId, startDate: parseKey(toKey(b.checkIn)), endDate: parseKey(toKey(b.checkOut)), source: 'BOOKING', bookingId: b.id, summary: 'Booked (direct)' },
         });
       }
     });
-    const b = await prisma.booking.findUnique({ where: { id: bookingId }, select: { clientId: true } });
+    const b = await db().booking.findUnique({ where: { id: bookingId }, select: { clientId: true } });
     if (b) await logComms(b.clientId, CommsType.BILL, 'marked paid (manual reconcile)');
     revalidatePath('/owner');
     revalidatePath('/owner/bookings');
@@ -343,13 +371,15 @@ export async function markPaid(bookingId: string): Promise<ActionResult> {
   } catch (e) {
     return { ok: false, error: (e as Error).message };
   }
+});
 }
 
 /** Owner-initiated cancellation of an approved/paid booking: releases the dates. */
 export async function cancelBooking(bookingId: string): Promise<ActionResult> {
+  return withTenant(await tenantIdFromHeaders(), async () => {
   try {
     await requireOwner();
-    await prisma.$transaction(async (tx) => {
+    await db().$transaction(async (tx) => {
       const b = await tx.booking.findUnique({ where: { id: bookingId } });
       if (!b) throw new Error('not_found');
       if (b.status === BookingStatus.CANCELLED || b.status === BookingStatus.EXPIRED) return;
@@ -357,7 +387,7 @@ export async function cancelBooking(bookingId: string): Promise<ActionResult> {
       // Release the held dates so the calendar reopens.
       await tx.calendarBlock.deleteMany({ where: { bookingId } });
     });
-    await logComms((await prisma.booking.findUnique({ where: { id: bookingId }, select: { clientId: true } }))!.clientId, CommsType.EMAIL, 'cancelled-by-owner');
+    await logComms((await db().booking.findUnique({ where: { id: bookingId }, select: { clientId: true } }))!.clientId, CommsType.EMAIL, 'cancelled-by-owner');
     revalidatePath('/owner');
     revalidatePath('/owner/bookings');
     revalidatePath(`/owner/bookings/${bookingId}`);
@@ -365,13 +395,15 @@ export async function cancelBooking(bookingId: string): Promise<ActionResult> {
   } catch (e) {
     return { ok: false, error: (e as Error).message };
   }
+});
 }
 
 /** One-click pre-arrival email (door code, Wi-Fi, directions, rules). */
 export async function sendArrivalEmail(bookingId: string): Promise<ActionResult> {
+  return withTenant(await tenantIdFromHeaders(), async () => {
   try {
     await requireOwner();
-    const b = await prisma.booking.findUnique({ where: { id: bookingId }, include: { client: true, property: true } });
+    const b = await db().booking.findUnique({ where: { id: bookingId }, include: { client: true, property: true } });
     if (!b) return { ok: false, error: 'not_found' };
     if (b.status !== BookingStatus.PAID && b.status !== BookingStatus.PARTIALLY_PAID)
       return { ok: false, error: 'Arrival info is only for confirmed (paid) stays.' };
@@ -379,13 +411,14 @@ export async function sendArrivalEmail(bookingId: string): Promise<ActionResult>
       return { ok: false, error: 'Add the address, door code and Wi-Fi under Settings → Arrival info first.' };
 
     await sendTemplate(b.client.email, buildArrivalEmail(b, b.client, b.property), notifyEmails()[0]);
-    await prisma.booking.update({ where: { id: bookingId }, data: { arrivalSent: true } });
+    await db().booking.update({ where: { id: bookingId }, data: { arrivalSent: true } });
     await logComms(b.clientId, CommsType.EMAIL, 'arrival-info');
     revalidatePath(`/owner/bookings/${bookingId}`);
     return { ok: true };
   } catch (e) {
     return { ok: false, error: (e as Error).message };
   }
+});
 }
 
 export type AdjustPriceInput = { bookingId: string; nightly: number; discount: number };
@@ -394,9 +427,10 @@ export type AdjustPriceInput = { bookingId: string; nightly: number; discount: n
  * money moves. Sets priceCustom so every payment path — finalize page, Square
  * charge, Instant ACH — uses the STORED money instead of requoting from rules. */
 export async function adjustBookingPrice(input: AdjustPriceInput): Promise<ActionResult> {
+  return withTenant(await tenantIdFromHeaders(), async () => {
   try {
     await requireOwner();
-    const b = await prisma.booking.findUnique({ where: { id: input.bookingId }, include: { property: true } });
+    const b = await db().booking.findUnique({ where: { id: input.bookingId }, include: { property: true } });
     if (!b) return { ok: false, error: 'not_found' };
     if (b.status !== BookingStatus.REQUESTED && b.status !== BookingStatus.APPROVED)
       return { ok: false, error: 'Price can only be changed before payment — this booking already has money on it.' };
@@ -421,7 +455,7 @@ export async function adjustBookingPrice(input: AdjustPriceInput): Promise<Actio
     const pct = b.commissionPercent > 0 ? b.commissionPercent : op.commissionPercent;
     const commissionBase = Math.round((money.subtotal - money.discount + b.cleaningFee + b.petFee) * 100) / 100;
     const offerSplit = b.depositAmount != null || b.balanceAmount != null;
-    await prisma.booking.update({
+    await db().booking.update({
       where: { id: b.id },
       data: {
         subtotal: money.subtotal, discount: money.discount, taxAmount: money.taxAmount,
@@ -440,6 +474,7 @@ export async function adjustBookingPrice(input: AdjustPriceInput): Promise<Actio
   } catch (e) {
     return { ok: false, error: (e as Error).message };
   }
+});
 }
 
 export type ManualBookingInput = {
@@ -456,6 +491,7 @@ export type ManualBookingInput = {
  * Owner pricing rules apply but min-nights does NOT — the owner may book any
  * length. Availability is still enforced transactionally. */
 export async function createManualBooking(input: ManualBookingInput): Promise<ActionResult & { bookingId?: string }> {
+  return withTenant(await tenantIdFromHeaders(), async () => {
   try {
     await requireOwner();
     const { checkIn, checkOut } = input;
@@ -478,16 +514,17 @@ export async function createManualBooking(input: ManualBookingInput): Promise<Ac
     });
 
     const markPaid = !!input.markPaid;
-    const booking = await prisma.$transaction(async (tx) => {
+    const booking = await db().$transaction(async (tx) => {
       await assertRangeAvailable(tx, op.propertyId, checkIn, checkOut);
       const client = await tx.client.upsert({
-        where: { email: input.email.toLowerCase().trim() },
+        where: { tenantId_email: { tenantId: tid(), email: input.email.toLowerCase().trim() } },
         update: { firstName: input.firstName.trim(), lastName: input.lastName.trim(), phone: input.phone?.trim() || undefined },
-        create: { email: input.email.toLowerCase().trim(), firstName: input.firstName.trim(), lastName: input.lastName.trim(), phone: input.phone?.trim() || null },
+        create: { tenantId: tid(), email: input.email.toLowerCase().trim(), firstName: input.firstName.trim(), lastName: input.lastName.trim(), phone: input.phone?.trim() || null },
       });
       const commissionBase = Math.round((money.subtotal - money.discount + cleaningFee) * 100) / 100;
       const created = await tx.booking.create({
         data: {
+          tenantId: tid(),
           reference: await newUniqueReference(tx),
           propertyId: op.propertyId,
           clientId: client.id,
@@ -509,7 +546,7 @@ export async function createManualBooking(input: ManualBookingInput): Promise<Ac
       });
       if (markPaid) {
         await tx.calendarBlock.create({
-          data: { propertyId: op.propertyId, startDate: parseKey(checkIn), endDate: parseKey(checkOut), source: BlockSource.BOOKING, bookingId: created.id, summary: 'Booked (owner)' },
+          data: { tenantId: tid(), propertyId: op.propertyId, startDate: parseKey(checkIn), endDate: parseKey(checkOut), source: BlockSource.BOOKING, bookingId: created.id, summary: 'Booked (owner)' },
         });
       }
       return created;
@@ -531,11 +568,13 @@ export async function createManualBooking(input: ManualBookingInput): Promise<Ac
     const msg = (e as Error).message;
     return { ok: false, error: msg === 'DATES_UNAVAILABLE' ? 'Those dates conflict with another booking or block.' : msg };
   }
+  });
 }
 
 /** Set a custom nightly price on [start, end) from the calendar. Flows straight
  * into guest quotes (quote-core prefers CUSTOM over seasonal). */
 export async function setNightlyRate(startKey: string, endKey: string, price: number): Promise<ActionResult> {
+  return withTenant(await tenantIdFromHeaders(), async () => {
   try {
     await requireOwner();
     if (!/^\d{4}-\d{2}-\d{2}$/.test(startKey) || !/^\d{4}-\d{2}-\d{2}$/.test(endKey) || startKey >= endKey)
@@ -550,10 +589,12 @@ export async function setNightlyRate(startKey: string, endKey: string, price: nu
   } catch (e) {
     return { ok: false, error: (e as Error).message };
   }
+});
 }
 
 /** Remove custom overrides on [start, end) — nights fall back to seasonal rates. */
 export async function clearNightlyRate(startKey: string, endKey: string): Promise<ActionResult> {
+  return withTenant(await tenantIdFromHeaders(), async () => {
   try {
     await requireOwner();
     if (!/^\d{4}-\d{2}-\d{2}$/.test(startKey) || !/^\d{4}-\d{2}-\d{2}$/.test(endKey) || startKey >= endKey)
@@ -566,25 +607,29 @@ export async function clearNightlyRate(startKey: string, endKey: string): Promis
   } catch (e) {
     return { ok: false, error: (e as Error).message };
   }
+});
 }
 
 /** Save the Airbnb iCal export URL (Settings). Empty string disables sync. */
 export async function saveAirbnbIcal(url: string): Promise<ActionResult> {
+  return withTenant(await tenantIdFromHeaders(), async () => {
   try {
     await requireOwner();
     const trimmed = url.trim();
     if (trimmed && !/^https?:\/\//i.test(trimmed)) return { ok: false, error: 'Enter the full https:// iCal export link from Airbnb.' };
-    await prisma.property.update({ where: { slug: DEFAULT_SLUG }, data: { airbnbIcalUrl: trimmed || null } });
+    await db().property.updateMany({ where: { slug: DEFAULT_SLUG }, data: { airbnbIcalUrl: trimmed || null } });
     revalidatePath('/owner/settings');
     revalidatePath('/owner/calendar');
     return { ok: true };
   } catch (e) {
     return { ok: false, error: (e as Error).message };
   }
+});
 }
 
 /** Owner blocks [start, end) on the calendar (personal use, maintenance...). */
 export async function blockDates(startKey: string, endKey: string, note?: string): Promise<ActionResult> {
+  return withTenant(await tenantIdFromHeaders(), async () => {
   try {
     await requireOwner();
     if (!/^\d{4}-\d{2}-\d{2}$/.test(startKey) || !/^\d{4}-\d{2}-\d{2}$/.test(endKey) || startKey >= endKey)
@@ -592,7 +637,7 @@ export async function blockDates(startKey: string, endKey: string, note?: string
     const propertyId = await getPropertyId(DEFAULT_SLUG);
     if (!propertyId) return { ok: false, error: 'property_not_found' };
 
-    await prisma.$transaction(async (tx) => {
+    await db().$transaction(async (tx) => {
       // Blocks may not cover a live booking's nights (guests already hold them).
       const clash = await tx.booking.findFirst({
         where: {
@@ -609,7 +654,7 @@ export async function blockDates(startKey: string, endKey: string, note?: string
       });
       if (clash) throw new Error(`Those dates include booking ${clash.reference} — cancel it first.`);
       await tx.calendarBlock.create({
-        data: { propertyId, startDate: parseKey(startKey), endDate: parseKey(endKey), source: BlockSource.OWNER, summary: note?.trim() || 'Blocked by owner' },
+        data: { tenantId: tid(), propertyId, startDate: parseKey(startKey), endDate: parseKey(endKey), source: BlockSource.OWNER, summary: note?.trim() || 'Blocked by owner' },
       });
     });
     revalidatePath('/owner/calendar');
@@ -617,21 +662,24 @@ export async function blockDates(startKey: string, endKey: string, note?: string
   } catch (e) {
     return { ok: false, error: (e as Error).message };
   }
+});
 }
 
 /** Remove an owner block. Airbnb blocks are sync-managed; bookings need Cancel. */
 export async function unblockDates(blockId: string): Promise<ActionResult> {
+  return withTenant(await tenantIdFromHeaders(), async () => {
   try {
     await requireOwner();
-    const block = await prisma.calendarBlock.findUnique({ where: { id: blockId } });
+    const block = await db().calendarBlock.findUnique({ where: { id: blockId } });
     if (!block) return { ok: false, error: 'not_found' };
     if (block.source !== BlockSource.OWNER) return { ok: false, error: 'Only owner blocks can be removed here.' };
-    await prisma.calendarBlock.delete({ where: { id: blockId } });
+    await db().calendarBlock.delete({ where: { id: blockId } });
     revalidatePath('/owner/calendar');
     return { ok: true };
   } catch (e) {
     return { ok: false, error: (e as Error).message };
   }
+});
 }
 
 export type ArrivalInfoInput = {
@@ -641,10 +689,11 @@ export type ArrivalInfoInput = {
 
 /** Save the property's arrival info (Settings editor). houseRules is newline-separated. */
 export async function saveArrivalInfo(input: ArrivalInfoInput): Promise<ActionResult> {
+  return withTenant(await tenantIdFromHeaders(), async () => {
   try {
     await requireOwner();
     const rules = input.houseRules.split('\n').map((r) => r.trim()).filter(Boolean);
-    await prisma.property.update({
+    await db().property.updateMany({
       where: { slug: DEFAULT_SLUG },
       data: {
         address: input.address.trim() || null,
@@ -662,4 +711,5 @@ export async function saveArrivalInfo(input: ArrivalInfoInput): Promise<ActionRe
   } catch (e) {
     return { ok: false, error: (e as Error).message };
   }
+});
 }

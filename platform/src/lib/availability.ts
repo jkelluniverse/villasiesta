@@ -1,11 +1,15 @@
-import { prisma } from './db';
-import { BlockSource, BookingStatus, type Prisma, type PrismaClient } from '@prisma/client';
+import { db } from './dal';
+import { BlockSource, BookingStatus, type Prisma } from '@prisma/client';
 import { parseKey, toKey } from './dates';
 
 export type BlockedRange = { start: string; end: string; source: 'booking' | 'owner' | 'airbnb' };
 
-// A Prisma transaction client or the base client — both expose the model queries we use.
-type Db = PrismaClient | Prisma.TransactionClient;
+// Structural client type: the base client, a transaction client, or the
+// tenant-scoped DAL client/transaction — anything exposing these two queries.
+type Db = {
+  booking: { findFirst(args: { where: Prisma.BookingWhereInput; select: { id: true } }): Promise<{ id: string } | null> };
+  calendarBlock: { findFirst(args: { where: Prisma.CalendarBlockWhereInput; select: { id: true } }): Promise<{ id: string } | null> };
+};
 
 /** Bookings that hold dates: PAID/PARTIALLY_PAID always; APPROVED while the hold is live. */
 function activeBookingWhere(propertyId: string, ci: Date, co: Date, excludeBookingId?: string): Prisma.BookingWhereInput {
@@ -63,7 +67,7 @@ export async function assertRangeAvailable(db: Db, propertyId: string, checkInKe
 export async function getBlockedRanges(propertyId: string): Promise<BlockedRange[]> {
   const now = new Date();
   const [bookings, blocks] = await Promise.all([
-    prisma.booking.findMany({
+    db().booking.findMany({
       where: {
         propertyId,
         OR: [
@@ -74,7 +78,7 @@ export async function getBlockedRanges(propertyId: string): Promise<BlockedRange
       },
       select: { checkIn: true, checkOut: true },
     }),
-    prisma.calendarBlock.findMany({
+    db().calendarBlock.findMany({
       where: { propertyId, source: { in: [BlockSource.OWNER, BlockSource.AIRBNB] } },
       select: { startDate: true, endDate: true, source: true },
     }),

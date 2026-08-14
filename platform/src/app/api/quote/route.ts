@@ -1,10 +1,13 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { resolveTenantId } from '@/lib/tenant';
+import { withTenant } from '@/lib/dal';
 import { computeQuote, loadPropertyPricing } from '@/lib/pricing';
 import { DEFAULT_SLUG } from '@/lib/property';
 
 export const dynamic = 'force-dynamic';
 
 export async function GET(req: NextRequest) {
+  return withTenant(await resolveTenantId(req.headers.get('host')), async () => {
   const q = req.nextUrl.searchParams;
   const slug = q.get('slug') || DEFAULT_SLUG;
   const loaded = await loadPropertyPricing(slug);
@@ -26,4 +29,5 @@ export async function GET(req: NextRequest) {
     method: (q.get('method') as 'ach' | 'card') || 'ach',
   });
   return NextResponse.json({ quote, pricing: loaded.pricing });
+});
 }

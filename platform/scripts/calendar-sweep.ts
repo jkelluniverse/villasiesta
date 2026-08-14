@@ -3,9 +3,9 @@
 // with the /api/cron endpoint.
 
 import { prisma } from '../src/lib/db';
-import { runCalendarSweep } from '../src/lib/sweeps';
+import { runCalendarSweepAllTenants } from '../src/lib/sweeps';
 
-runCalendarSweep()
+runCalendarSweepAllTenants()
   .then((r) => console.log('[cal-sweep] done', JSON.stringify(r)))
   .catch((e) => { console.error('[cal-sweep] fatal', e); process.exit(1); })
   .finally(async () => { await prisma.$disconnect(); });

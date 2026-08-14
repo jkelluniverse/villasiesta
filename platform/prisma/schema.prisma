@@ -13,8 +13,9 @@ datasource db {
 
 // ---------- Auth (owner + dad) ----------
 enum Role {
-  OWNER   // full control
+  OWNER   // full control of their tenant
   VIEWER  // read-only (e.g. dad)
+  ADMIN   // platform operator (Kell Systems) — cross-tenant
 }
 
 model User {
@@ -24,12 +25,125 @@ model User {
   passwordHash String?  // if using credentials; omit for magic-link
   role         Role     @default(OWNER)
   createdAt    DateTime @default(now())
+
+  tenants TenantUser[]
+}
+
+// ---------- Multi-tenancy (Siesta Engine) ----------
+// One deployment, one Postgres, logical isolation: every tenant-scoped model
+// carries tenantId, and queries go through the DAL (src/lib/dal.ts) which
+// injects the tenant filter. scripts/check-tenancy.mjs guards the build.
+enum TenantStatus {
+  ACTIVE
+  TRIAL
+  SUSPENDED
+}
+
+model Tenant {
+  id        String       @id @default(cuid())
+  slug      String       @unique          // {slug}.siestaengine.com
+  name      String
+  status    TenantStatus @default(ACTIVE)
+  createdAt DateTime     @default(now())
+
+  domains  Domain[]
+  users    TenantUser[]
+  branding Branding?
+  content  SiteContent[]
+  square   SquareAccount?
+  planFee  PlanFee?
+  invoices PlatformInvoice[]
+}
+
+model Domain {
+  id        String  @id @default(cuid())
+  tenantId  String
+  hostname  String  @unique               // villasiestasarasota.com
+  isPrimary Boolean @default(false)
+  sslStatus String  @default("active")    // active | pending | error
+  tenant    Tenant  @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@index([tenantId])
+}
+
+model TenantUser {
+  id       String @id @default(cuid())
+  tenantId String
+  userId   String
+  role     Role   @default(OWNER)
+  tenant   Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  user     User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([tenantId, userId])
+  @@index([userId])
+}
+
+model Branding {
+  id           String  @id @default(cuid())
+  tenantId     String  @unique
+  colors       Json    @default("{}")     // {primary, deep, bg, line, ...}
+  fontDisplay  String  @default("Cormorant Garamond")
+  fontBody     String  @default("Montserrat")
+  logoUrl      String?
+  monogramText String?                    // auto from initials when no logo
+  tagline      String?
+  footerText   String?
+  ogImage      String?
+  tenant       Tenant  @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+}
+
+model SiteContent {
+  id       String @id @default(cuid())
+  tenantId String
+  section  String                          // hero | amenities | about | location | rules ...
+  json     Json
+  tenant   Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@unique([tenantId, section])
+}
+
+model SquareAccount {
+  id           String   @id @default(cuid())
+  tenantId     String   @unique
+  merchantId   String   @unique            // webhook events resolve tenant by merchant_id
+  accessToken  String                      // encrypted (AES-256-GCM, ACH_ENC_KEY-style)
+  refreshToken String                      // encrypted
+  locationId   String
+  scopes       String[]
+  connectedAt  DateTime @default(now())
+  tenant       Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+}
+
+model PlanFee {
+  id                String   @id @default(cuid())
+  tenantId          String   @unique
+  setupFee          Float    @default(0)
+  monthlyFee        Float    @default(0)
+  bookingFeePercent Float    @default(9)
+  billingAnchor     DateTime @default(now())
+  tenant            Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+}
+
+model PlatformInvoice {
+  id              String   @id @default(cuid())
+  tenantId        String
+  period          String                    // "2026-08"
+  monthlyFee      Float    @default(0)
+  bookingFees     Float    @default(0)
+  total           Float    @default(0)
+  status          String   @default("due")  // due | paid
+  squarePaymentId String?
+  createdAt       DateTime @default(now())
+  tenant          Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@unique([tenantId, period])
 }
 
 // ---------- Property (multi-property ready; Villa Siesta is the first) ----------
 model Property {
   id             String   @id @default(cuid())
-  slug           String   @unique          // "villa-siesta"
+  tenantId       String
+  slug           String                    // unique per tenant
   name           String
   location       String
   bedrooms       Int
@@ -65,16 +179,22 @@ model Property {
   fees         Fee[]
   bookings     Booking[]
   blocks       CalendarBlock[]
+
+  @@unique([tenantId, slug])
+  @@index([tenantId])
 }
 
 model Photo {
   id         String  @id @default(cuid())
+  tenantId   String
   propertyId String
   url        String
   label      String  // "Living room", "Full bathroom 1", "Pool"...
   sublabel   String? // "King bed"
   sortOrder  Int     @default(0)
   property   Property @relation(fields: [propertyId], references: [id], onDelete: Cascade)
+
+  @@index([tenantId])
 }
 
 // ---------- Pricing: seasonal defaults + owner overrides + blackouts ----------
@@ -87,6 +207,7 @@ enum PricingType {
 
 model PricingRule {
   id         String      @id @default(cuid())
+  tenantId   String
   propertyId String
   type       PricingType
   month      Int?        // 1-12 for SEASONAL
@@ -98,6 +219,7 @@ model PricingRule {
   property   Property    @relation(fields: [propertyId], references: [id], onDelete: Cascade)
 
   @@index([propertyId, type])
+  @@index([tenantId])
 }
 
 enum FeeType {
@@ -110,16 +232,20 @@ enum FeeType {
 
 model Fee {
   id         String  @id @default(cuid())
+  tenantId   String
   propertyId String
   type       FeeType
   amount     Float   // flat dollars, or percent for TAX/CARD
   threshold  Int?    // e.g. extra guest after N
   property   Property @relation(fields: [propertyId], references: [id], onDelete: Cascade)
+
+  @@index([tenantId])
 }
 
 // ---------- Guests / clients (save all client data) ----------
 model Client {
   id        String    @id @default(cuid())
+  tenantId  String
   firstName String
   lastName  String
   email     String
@@ -131,7 +257,8 @@ model Client {
   bookings  Booking[]
   comms     CommsLog[]
 
-  @@unique([email])
+  @@unique([tenantId, email])
+  @@index([tenantId])
 }
 
 // ---------- Bookings (the state machine: requested -> approved -> paid) ----------
@@ -161,6 +288,7 @@ enum PaymentPlan {
 
 model Booking {
   id             String         @id @default(cuid())
+  tenantId       String
   reference      String         @unique   // public booking name, e.g. "VS-7K3M" (memo-safe)
   propertyId     String
   clientId       String
@@ -215,6 +343,7 @@ model Booking {
 
   @@index([propertyId, status])
   @@index([checkIn, checkOut])
+  @@index([tenantId, status])
 }
 
 // ---------- Instant ACH (direct bank details, owner-originated) ----------
@@ -224,6 +353,7 @@ model Booking {
 // (authText + consentAt + ipAddress + userAgent) is the NACHA WEB-debit proof.
 model AchAuthorization {
   id            String   @id @default(cuid())
+  tenantId      String
   bookingId     String
   nameOnAccount String
   bankName      String
@@ -240,6 +370,7 @@ model AchAuthorization {
   booking       Booking  @relation(fields: [bookingId], references: [id], onDelete: Cascade)
 
   @@index([bookingId])
+  @@index([tenantId])
 }
 
 // ---------- Manual transfer-app payments (Cash App / Venmo / Zelle / Chime) ----------
@@ -247,6 +378,7 @@ model AchAuthorization {
 // the paper trail — a booking is only PAID once the owner records enough of these.
 model ManualPayment {
   id         String        @id @default(cuid())
+  tenantId   String
   bookingId  String
   method     PaymentMethod
   amount     Float
@@ -258,6 +390,7 @@ model ManualPayment {
   booking    Booking       @relation(fields: [bookingId], references: [id], onDelete: Cascade)
 
   @@index([bookingId])
+  @@index([tenantId])
 }
 
 // ---------- Calendar blocks (owner blocks, Airbnb-synced, and booking holds) ----------
@@ -269,6 +402,7 @@ enum BlockSource {
 
 model CalendarBlock {
   id         String      @id @default(cuid())
+  tenantId   String
   propertyId String
   startDate  DateTime    @db.Date
   endDate    DateTime    @db.Date  // checkout-exclusive
@@ -281,15 +415,19 @@ model CalendarBlock {
   booking  Booking? @relation(fields: [bookingId], references: [id], onDelete: Cascade)
 
   @@index([propertyId, startDate, endDate])
+  @@index([tenantId])
 }
 
 // ---------- Airbnb sync bookkeeping ----------
 model SyncLog {
   id           String   @id @default(cuid())
+  tenantId     String
   propertyId   String
   status       String   // healthy | error
   message      String?
   ranAt        DateTime @default(now())
+
+  @@index([tenantId])
 }
 
 // ---------- One-click comms + billing audit ----------
@@ -302,9 +440,12 @@ enum CommsType {
 
 model CommsLog {
   id        String    @id @default(cuid())
+  tenantId  String
   clientId  String
   type      CommsType
   detail    String?   // e.g. subject, or Square payment link sent
   sentAt    DateTime  @default(now())
   client    Client    @relation(fields: [clientId], references: [id], onDelete: Cascade)
+
+  @@index([tenantId])
 }

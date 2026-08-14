@@ -3,7 +3,7 @@
 // adjusted booking prices exactly like a quoted one. Every path that charges a
 // priceCustom booking must use its STORED money — never recompute from rules.
 
-import { prisma } from './db';
+import { db } from './dal';
 import { loadPropertyPricing, advertisedNightly } from './pricing';
 import { eachNight } from './dates';
 
@@ -36,7 +36,7 @@ export async function loadOwnerPricing(slug: string): Promise<{
   const loaded = await loadPropertyPricing(slug);
   if (!loaded) return null;
   const { pricing } = loaded;
-  const meta = await prisma.property.findUnique({ where: { id: loaded.propertyId }, select: { commissionPercent: true } });
+  const meta = await db().property.findUnique({ where: { id: loaded.propertyId }, select: { commissionPercent: true } });
   return {
     propertyId: loaded.propertyId,
     currency: pricing.currency,
@@ -54,6 +54,6 @@ export async function loadOwnerPricing(slug: string): Promise<{
 
 /** Tax percent for a property (for the adjust modal's live preview). */
 export async function taxPercentFor(propertyId: string): Promise<number> {
-  const fee = await prisma.fee.findFirst({ where: { propertyId, type: 'TAX_PERCENT' } });
+  const fee = await db().fee.findFirst({ where: { propertyId, type: 'TAX_PERCENT' } });
   return fee?.amount ?? 0;
 }

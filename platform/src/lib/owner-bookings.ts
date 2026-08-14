@@ -1,5 +1,5 @@
-import { prisma } from './db';
 import { BookingStatus } from '@prisma/client';
+import { db, tid } from './dal';
 import { getPaymentDetails, type PaymentDetails } from './square';
 import { displayStatus, planLabel, type StatusTone } from './bookingStatus';
 import { taxPercentFor } from './owner-pricing';
@@ -35,17 +35,17 @@ function paidOf(b: { status: BookingStatus; total: number; depositAmount: number
 }
 
 export async function listBookings(slug: string): Promise<BookingRow[]> {
-  const property = await prisma.property.findUnique({ where: { slug }, select: { id: true } });
+  const property = await db().property.findFirst({ where: { slug }, select: { id: true } });
   if (!property) return [];
   const [bookings, airbnbBlocks] = await Promise.all([
-    prisma.booking.findMany({
+    db().booking.findMany({
       where: { propertyId: property.id },
       include: { client: true },
       orderBy: { checkIn: 'desc' },
     }),
     // Airbnb reservations, as synced from the iCal feed — dates only (Airbnb
     // shares no guest details or amounts through calendar export).
-    prisma.calendarBlock.findMany({
+    db().calendarBlock.findMany({
       where: { propertyId: property.id, source: 'AIRBNB' },
       orderBy: { startDate: 'desc' },
     }),
@@ -179,7 +179,7 @@ const bMoney = (cur: string, n: number) => cur + Math.round(n).toLocaleString();
 const bDay = (k: string) => { const [y, m, d] = k.split('-').map(Number); return new Date(y, m - 1, d).toLocaleDateString('en-US', { month: 'short', day: 'numeric' }); };
 
 export async function getBookingDetail(id: string): Promise<BookingDetail | null> {
-  const b = await prisma.booking.findUnique({
+  const b = await db().booking.findUnique({
     where: { id },
     include: { client: true, property: true },
   });
@@ -191,7 +191,7 @@ export async function getBookingDetail(id: string): Promise<BookingDetail | null
   const remaining = Math.max(0, Math.round(b.total) - Math.round(paid));
 
   // Activity log for this guest (comms) — most recent first.
-  const comms = await prisma.commsLog.findMany({
+  const comms = await db().commsLog.findMany({
     where: { clientId: b.clientId },
     orderBy: { sentAt: 'desc' },
     take: 40,
@@ -199,9 +199,9 @@ export async function getBookingDetail(id: string): Promise<BookingDetail | null
   const lastBill = comms.find((c) => c.type === 'BILL');
 
   // Manual transfer-app receipts recorded by the owner (the paper trail).
-  const manualRows = await prisma.manualPayment.findMany({ where: { bookingId: b.id }, orderBy: { receivedAt: 'asc' } });
+  const manualRows = await db().manualPayment.findMany({ where: { bookingId: b.id }, orderBy: { receivedAt: 'asc' } });
   // Latest instant-ACH mandate (masked — full numbers only via the audited Reveal).
-  const achAuth = await prisma.achAuthorization.findFirst({ where: { bookingId: b.id }, orderBy: { consentAt: 'desc' } });
+  const achAuth = await db().achAuthorization.findFirst({ where: { bookingId: b.id }, orderBy: { consentAt: 'desc' } });
   const achPending = !!achAuth && ['authorized', 'originated'].includes(achAuth.status) && b.status === 'APPROVED';
 
   // ---- Payment records, derived from live status ----

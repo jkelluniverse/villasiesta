@@ -1,4 +1,5 @@
-import { prisma } from '@/lib/db';
+import { tenantIdFromHeaders } from '@/lib/tenant';
+import { withTenant, db } from '@/lib/dal';
 import { toKey } from '@/lib/dates';
 import { BookingStatus } from '@prisma/client';
 import Link from 'next/link';
@@ -10,7 +11,8 @@ const niceDate = (key: string) => { const [y, m, d] = key.split('-').map(Number)
 type NodeState = 'done' | 'active' | 'future' | 'cancelled';
 
 export default async function BookingStatusPage({ params }: { params: { id: string } }) {
-  const b = await prisma.booking.findUnique({ where: { id: params.id }, include: { client: true, property: true } });
+  return withTenant(await tenantIdFromHeaders(), async () => {
+  const b = await db().booking.findUnique({ where: { id: params.id }, include: { client: true, property: true } });
   if (!b) {
     return <main className="wrap" style={{ padding: '120px 0' }}><h1 className="lead">Booking not found</h1><p style={{ color: 'var(--muted)' }}>This link may be expired. <Link href="/">Return home →</Link></p></main>;
   }
@@ -61,4 +63,5 @@ export default async function BookingStatusPage({ params }: { params: { id: stri
       </div>
     </main>
   );
+});
 }

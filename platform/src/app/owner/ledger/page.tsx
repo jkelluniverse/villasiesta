@@ -1,4 +1,6 @@
 import { getServerSession } from 'next-auth';
+import { tenantIdFromHeaders } from '@/lib/tenant';
+import { withTenant } from '@/lib/dal';
 import { redirect } from 'next/navigation';
 import Link from 'next/link';
 import { authOptions } from '@/lib/auth';
@@ -16,6 +18,7 @@ const niceRange = (a: string, b: string) => {
 };
 
 export default async function LedgerPage({ searchParams }: { searchParams: { y?: string } }) {
+  return withTenant(await tenantIdFromHeaders(), async () => {
   const session = await getServerSession(authOptions);
   if (!session?.user) redirect('/owner/login');
   const isOwner = session.user.role === 'OWNER';
@@ -80,6 +83,7 @@ export default async function LedgerPage({ searchParams }: { searchParams: { y?:
       </div>
     </>
   );
+});
 }
 
 function MonthTable({ m, money, cur, isOwner }: { m: LedgerMonth; money: (n: number) => string; cur: string; isOwner: boolean }) {

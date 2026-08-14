@@ -2,8 +2,9 @@
 // secret-protected /api/cron endpoint. Each returns a small summary and never
 // throws for per-booking failures — a bad row must not stall the rest.
 
-import { BookingStatus, CommsType } from '@prisma/client';
+import { BookingStatus, CommsType, TenantStatus } from '@prisma/client';
 import { prisma } from './db';
+import { db, tid, withTenant } from './dal';
 import { createSquarePayment, createPaymentLink, toCents } from './square';
 import { sendEmail, sendTemplate, notifyEmails } from './email';
 import { paidConfirmation, ownerPaymentAlert } from './emails';
@@ -16,7 +17,6 @@ import { addDays, toKey, todayKey } from './dates';
 const CARD_MARKUP = 1.03;
 const MANUAL_CUTOFF_DAYS = 7;    // stop auto-retrying at check-in − 7
 const ARRIVAL_LEAD_DAYS = 3;     // arrival email 3 days before check-in
-const SLUG = 'villa-siesta';
 
 async function alertOwner(bookingId: string, msg: string) {
   const to = notifyEmails();
@@ -26,7 +26,7 @@ async function alertOwner(bookingId: string, msg: string) {
 /** Charge due SPLIT balances on the stored card; manual splits get a reminder. */
 export async function runBalanceSweep(): Promise<{ due: number; charged: number; reminded: number; failed: number }> {
   const today = todayKey();
-  const due = await prisma.booking.findMany({
+  const due = await db().booking.findMany({
     where: {
       paymentPlan: 'SPLIT',
       balancePaid: false,
@@ -51,12 +51,12 @@ export async function runBalanceSweep(): Promise<{ due: number; charged: number;
       // unless there's an ACH mandate covering the second debit, which is the
       // OWNER's action (originate at the bank), not the guest's.
       if (!b.squareCardId || !b.squareCustomerId) {
-        const achAuth = await prisma.achAuthorization.findFirst({
+        const achAuth = await db().achAuthorization.findFirst({
           where: { bookingId: b.id, status: { in: ['authorized', 'originated', 'settled'] } },
           orderBy: { consentAt: 'desc' },
         });
         if (achAuth) {
-          const alreadyAch = await prisma.commsLog.findFirst({
+          const alreadyAch = await db().commsLog.findFirst({
             where: { clientId: b.clientId, type: CommsType.EMAIL, detail: 'ach-balance-originate', sentAt: b.balanceDueDate ? { gte: b.balanceDueDate } : undefined },
           });
           if (!alreadyAch) {
@@ -72,7 +72,7 @@ export async function runBalanceSweep(): Promise<{ due: number; charged: number;
           }
           continue;
         }
-        const already = await prisma.commsLog.findFirst({
+        const already = await db().commsLog.findFirst({
           where: { clientId: b.clientId, type: CommsType.EMAIL, detail: 'manual-balance-reminder', sentAt: b.balanceDueDate ? { gte: b.balanceDueDate } : undefined },
         });
         if (!already) {
@@ -107,7 +107,7 @@ export async function runBalanceSweep(): Promise<{ due: number; charged: number;
 
       if (res.ok && (res.status === 'COMPLETED' || res.mock)) {
         const money2 = (n: number) => Math.round(n * 100) / 100;
-        await prisma.booking.update({
+        await db().booking.update({
           where: { id: b.id },
           data: { balancePaid: true, status: BookingStatus.PAID, cardFee: money2((b.cardFee || 0) + (charge - balance)), total: money2((b.total || 0) + (charge - balance)) },
         });
@@ -126,7 +126,7 @@ export async function runBalanceSweep(): Promise<{ due: number; charged: number;
           amountCents: toCents(charge),
           idempotencyKey: `bk_${b.id}_balancelink_${today}`,
         });
-        if (link.orderId) await prisma.booking.update({ where: { id: b.id }, data: { squareOrderId: link.orderId } });
+        if (link.orderId) await db().booking.update({ where: { id: b.id }, data: { squareOrderId: link.orderId } });
         await sendEmail({
           to: b.client.email, replyTo: notifyEmails()[0],
           subject: 'Action needed: balance payment — Villa Siesta',
@@ -147,7 +147,7 @@ export async function runBalanceSweep(): Promise<{ due: number; charged: number;
 /** Send the pre-arrival email 3 days before check-in for confirmed stays. */
 export async function runArrivalSweep(): Promise<{ due: number; sent: number; skipped: number }> {
   const target = addDays(todayKey(), ARRIVAL_LEAD_DAYS);
-  const due = await prisma.booking.findMany({
+  const due = await db().booking.findMany({
     where: {
       arrivalSent: false,
       status: { in: [BookingStatus.PAID, BookingStatus.PARTIALLY_PAID] },
@@ -168,7 +168,7 @@ export async function runArrivalSweep(): Promise<{ due: number; sent: number; sk
     }
     try {
       await sendTemplate(b.client.email, buildArrivalEmail(b, b.client, b.property), notifyEmails()[0]);
-      await prisma.booking.update({ where: { id: b.id }, data: { arrivalSent: true } });
+      await db().booking.update({ where: { id: b.id }, data: { arrivalSent: true } });
       await logComms(b.clientId, CommsType.EMAIL, 'arrival-info (auto)');
       out.sent++;
       console.log(`[arrival-sweep] ${b.id}: arrival email sent to ${b.client.email}`);
@@ -182,7 +182,7 @@ export async function runArrivalSweep(): Promise<{ due: number; sent: number; sk
 
 /** Expire stale APPROVED holds + pull the Airbnb iCal feed + purge old bank data. */
 export async function runCalendarSweep(): Promise<{ expired: number; purged: number; airbnb: { ok: boolean; imported?: number; error?: string } }> {
-  const stale = await prisma.booking.findMany({
+  const stale = await db().booking.findMany({
     where: {
       status: BookingStatus.APPROVED,
       holdExpiresAt: { lt: new Date() },
@@ -195,7 +195,7 @@ export async function runCalendarSweep(): Promise<{ expired: number; purged: num
   console.log(`[cal-sweep] ${stale.length} stale hold(s)`);
 
   for (const b of stale) {
-    await prisma.$transaction(async (tx) => {
+    await db().$transaction(async (tx) => {
       await tx.booking.update({ where: { id: b.id }, data: { status: BookingStatus.EXPIRED } });
       await tx.calendarBlock.deleteMany({ where: { bookingId: b.id } });
     });
@@ -213,13 +213,13 @@ export async function runCalendarSweep(): Promise<{ expired: number; purged: num
     console.log(`[cal-sweep] expired ${b.reference} (${b.id}) — dates released`);
   }
 
-  const sync = await syncAirbnb(SLUG);
+  const sync = await syncAirbnb();
   if (sync.ok) console.log(`[cal-sweep] airbnb sync: ${sync.imported ?? 0} imported`);
   else console.error(`[cal-sweep] airbnb sync failed: ${sync.error}`);
 
   // Bank-data hygiene: null encrypted routing/account 30 days after settlement
   // (the masked last4 + consent record stay for the audit trail).
-  const purge = await prisma.achAuthorization.updateMany({
+  const purge = await db().achAuthorization.updateMany({
     where: { status: 'settled', settledAt: { lt: new Date(Date.now() - 30 * 864e5) }, encBlob: { not: '' } },
     data: { encBlob: '' },
   });
@@ -227,3 +227,26 @@ export async function runCalendarSweep(): Promise<{ expired: number; purged: num
 
   return { expired: stale.length, purged: purge.count, airbnb: { ok: sync.ok, imported: sync.imported, error: sync.error } };
 }
+
+// ── Fleet iteration (spec §7): run a job for every active tenant; one broken
+// tenant (bad feed, Square hiccup) never blocks the rest. ──
+type JobResult = { tenant: string; ok: boolean; result?: unknown; error?: string };
+
+async function runForAllTenants(name: string, job: () => Promise<unknown>): Promise<JobResult[]> {
+  const tenants = await prisma.tenant.findMany({ where: { status: { in: [TenantStatus.ACTIVE, TenantStatus.TRIAL] } }, select: { id: true, slug: true } });
+  const out: JobResult[] = [];
+  for (const t of tenants) {
+    try {
+      const result = await withTenant(t.id, job);
+      out.push({ tenant: t.slug, ok: true, result });
+    } catch (e) {
+      console.error(`[${name}] tenant ${t.slug} failed:`, e);
+      out.push({ tenant: t.slug, ok: false, error: (e as Error).message });
+    }
+  }
+  return out;
+}
+
+export const runBalanceSweepAllTenants = () => runForAllTenants('sweep', runBalanceSweep);
+export const runArrivalSweepAllTenants = () => runForAllTenants('arrival-sweep', runArrivalSweep);
+export const runCalendarSweepAllTenants = () => runForAllTenants('cal-sweep', runCalendarSweep);

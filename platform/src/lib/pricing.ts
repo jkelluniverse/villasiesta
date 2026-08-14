@@ -1,4 +1,4 @@
-import { prisma } from './db';
+import { db } from './dal';
 import { FeeType, PricingType, type Prisma } from '@prisma/client';
 import { toKey } from './dates';
 import type { Fees, PropertyPricing } from './quote-core';
@@ -29,7 +29,7 @@ export function seasonalMap(ruleRows: RuleRow[]): Record<number, number> {
 
 /** Load a property's full pricing (seasonal + custom + fees) for quoting. */
 export async function loadPropertyPricing(slug: string): Promise<{ propertyId: string; pricing: PropertyPricing } | null> {
-  const property = await prisma.property.findUnique({
+  const property = await db().property.findFirst({
     where: { slug },
     include: { pricingRules: true, fees: true },
   });

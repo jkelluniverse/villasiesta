@@ -1,4 +1,4 @@
-import { prisma } from './db';
+import { db, tid } from './dal';
 import { PricingType } from '@prisma/client';
 import { parseKey, toKey } from './dates';
 
@@ -15,7 +15,7 @@ export async function applyCustomRate(propertyId: string, startKey: string, endK
   const start = parseKey(startKey);
   const end = parseKey(endKey);
 
-  await prisma.$transaction(async (tx) => {
+  await db().$transaction(async (tx) => {
     const overlapping = await tx.pricingRule.findMany({
       where: {
         propertyId,
@@ -30,19 +30,19 @@ export async function applyCustomRate(propertyId: string, startKey: string, endK
       // Keep the pieces of the old rule that fall outside the edited range.
       if (r.startDate! < start) {
         await tx.pricingRule.create({
-          data: { propertyId, type: PricingType.CUSTOM, startDate: r.startDate, endDate: start, value: r.value, note: r.note },
+          data: { tenantId: tid(), propertyId, type: PricingType.CUSTOM, startDate: r.startDate, endDate: start, value: r.value, note: r.note },
         });
       }
       if (r.endDate! > end) {
         await tx.pricingRule.create({
-          data: { propertyId, type: PricingType.CUSTOM, startDate: end, endDate: r.endDate, value: r.value, note: r.note },
+          data: { tenantId: tid(), propertyId, type: PricingType.CUSTOM, startDate: end, endDate: r.endDate, value: r.value, note: r.note },
         });
       }
     }
 
     if (price != null) {
       await tx.pricingRule.create({
-        data: { propertyId, type: PricingType.CUSTOM, startDate: start, endDate: end, value: Math.round(price), note: `set from calendar ${toKey(new Date())}` },
+        data: { tenantId: tid(), propertyId, type: PricingType.CUSTOM, startDate: start, endDate: end, value: Math.round(price), note: `set from calendar ${toKey(new Date())}` },
       });
     }
   });

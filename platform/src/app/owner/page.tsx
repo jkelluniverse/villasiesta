@@ -1,4 +1,6 @@
 import { getServerSession } from 'next-auth';
+import { tenantIdFromHeaders } from '@/lib/tenant';
+import { withTenant } from '@/lib/dal';
 import { redirect } from 'next/navigation';
 import Link from 'next/link';
 import { authOptions } from '@/lib/auth';
@@ -14,6 +16,7 @@ const money = (c: string, n: number) => c + Math.round(n).toLocaleString();
 const niceDay = (key: string) => { const [y, m, d] = key.split('-').map(Number); return new Date(y, m - 1, d).toLocaleDateString('en-US', { month: 'short', day: 'numeric' }); };
 
 export default async function OwnerDashboard() {
+  return withTenant(await tenantIdFromHeaders(), async () => {
   const session = await getServerSession(authOptions);
   if (!session?.user) redirect('/owner/login');
   const isOwner = session.user.role === 'OWNER';
@@ -97,4 +100,5 @@ export default async function OwnerDashboard() {
       </div>
     </>
   );
+});
 }

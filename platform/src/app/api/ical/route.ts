@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { prisma } from '@/lib/db';
+import { resolveTenantId } from '@/lib/tenant';
+import { withTenant, db } from '@/lib/dal';
 import { BlockSource, BookingStatus } from '@prisma/client';
 import { toKey } from '@/lib/dates';
 import { DEFAULT_SLUG } from '@/lib/property';
@@ -13,17 +14,18 @@ export const dynamic = 'force-dynamic';
 // blocks are excluded (they came FROM Airbnb; echoing them back would loop).
 // If ICAL_EXPORT_TOKEN is set, the URL must carry ?token=<value>.
 export async function GET(req: NextRequest) {
+  return withTenant(await resolveTenantId(req.headers.get('host')), async () => {
   const required = process.env.ICAL_EXPORT_TOKEN || '';
   if (required && req.nextUrl.searchParams.get('token') !== required) {
     return NextResponse.json({ error: 'unauthorized' }, { status: 401 });
   }
 
-  const property = await prisma.property.findUnique({ where: { slug: DEFAULT_SLUG }, select: { id: true, name: true } });
+  const property = await db().property.findFirst({ where: { slug: DEFAULT_SLUG }, select: { id: true, name: true } });
   if (!property) return NextResponse.json({ error: 'not_found' }, { status: 404 });
 
   const now = new Date();
   const [bookings, blocks] = await Promise.all([
-    prisma.booking.findMany({
+    db().booking.findMany({
       where: {
         propertyId: property.id,
         checkOut: { gt: now },
@@ -35,7 +37,7 @@ export async function GET(req: NextRequest) {
       },
       select: { id: true, checkIn: true, checkOut: true },
     }),
-    prisma.calendarBlock.findMany({
+    db().calendarBlock.findMany({
       where: { propertyId: property.id, source: BlockSource.OWNER, endDate: { gt: now } },
       select: { id: true, startDate: true, endDate: true },
     }),
@@ -66,4 +68,5 @@ export async function GET(req: NextRequest) {
   return new NextResponse(lines.join('\r\n') + '\r\n', {
     headers: { 'Content-Type': 'text/calendar; charset=utf-8', 'Cache-Control': 'no-cache' },
   });
+});
 }

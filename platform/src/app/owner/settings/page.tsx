@@ -1,7 +1,8 @@
 import { getServerSession } from 'next-auth';
+import { tenantIdFromHeaders } from '@/lib/tenant';
+import { withTenant, db } from '@/lib/dal';
 import { redirect } from 'next/navigation';
 import { authOptions } from '@/lib/auth';
-import { prisma } from '@/lib/db';
 import { DEFAULT_SLUG } from '@/lib/property';
 import OwnerBar from '../OwnerBar';
 import ArrivalEditor from './ArrivalEditor';
@@ -12,11 +13,12 @@ import CommissionEditor from './CommissionEditor';
 export const dynamic = 'force-dynamic';
 
 export default async function SettingsPage() {
+  return withTenant(await tenantIdFromHeaders(), async () => {
   const session = await getServerSession(authOptions);
   if (!session?.user) redirect('/owner/login');
   const isOwner = session.user.role === 'OWNER';
 
-  const p = await prisma.property.findUnique({
+  const p = await db().property.findFirst({
     where: { slug: DEFAULT_SLUG },
     select: {
       address: true, doorCode: true, wifiName: true, wifiPassword: true,
@@ -83,4 +85,5 @@ export default async function SettingsPage() {
       </div>
     </>
   );
+});
 }

@@ -1,5 +1,5 @@
-import { prisma } from './db';
 import { BookingStatus } from '@prisma/client';
+import { db, tid } from './dal';
 import { getBlockedRanges } from './availability';
 import { appLabel } from './manual';
 import { addDays, toKey, todayKey } from './dates';
@@ -27,17 +27,17 @@ function netOf(b: { total: number; taxAmount: number; cardFee: number; commissio
 const monthLabel = (d: Date) => d.toLocaleString('en-US', { month: 'short' });
 
 export async function getDashboard(slug: string): Promise<Dashboard | null> {
-  const property = await prisma.property.findUnique({ where: { slug }, select: { id: true, currency: true } });
+  const property = await db().property.findFirst({ where: { slug }, select: { id: true, currency: true } });
   if (!property) return null;
 
   const [bookings, ranges, owner] = await Promise.all([
-    prisma.booking.findMany({
+    db().booking.findMany({
       where: { propertyId: property.id },
       include: { client: true, achAuthorizations: { orderBy: { consentAt: 'desc' }, take: 1 } },
       orderBy: { checkIn: 'asc' },
     }),
     getBlockedRanges(property.id),
-    prisma.user.findFirst({ where: { role: 'OWNER' }, select: { name: true } }),
+    db().user.findFirst({ where: { role: 'OWNER' }, select: { name: true } }),
   ]);
 
   const now = new Date();

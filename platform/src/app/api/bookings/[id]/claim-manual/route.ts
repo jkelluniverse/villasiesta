@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { resolveTenantId } from '@/lib/tenant';
+import { withTenant, db } from '@/lib/dal';
 import { z } from 'zod';
-import { prisma } from '@/lib/db';
 import { claimManualPayment, appLabel, MANUAL_METHODS } from '@/lib/manual';
 import { sendTemplate, notifyEmails } from '@/lib/email';
 import { ownerManualClaim } from '@/lib/emails';
@@ -19,6 +20,7 @@ const Input = z.object({
 // (does not lock) the dates, and alerts the owner + dad to verify. Nothing is
 // marked paid — that only happens when the owner records the payment.
 export async function POST(req: NextRequest, { params }: { params: { id: string } }) {
+  return withTenant(await resolveTenantId(req.headers.get('host')), async () => {
   let body: unknown;
   try { body = await req.json(); } catch { return NextResponse.json({ error: 'bad_json' }, { status: 400 }); }
   const parsed = Input.safeParse(body);
@@ -29,7 +31,7 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
   const claim = await claimManualPayment(params.id, method);
   if (!claim.ok) return NextResponse.json({ error: claim.error, message: 'This booking can’t accept a payment claim right now.' }, { status: 409 });
 
-  const b = await prisma.booking.findUnique({ where: { id: params.id }, include: { client: true } });
+  const b = await db().booking.findUnique({ where: { id: params.id }, include: { client: true } });
   if (b) {
     const owners = notifyEmails();
     if (owners.length) {
@@ -40,4 +42,5 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
   }
 
   return NextResponse.json({ ok: true });
+});
 }

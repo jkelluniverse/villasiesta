@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { resolveTenantId } from '@/lib/tenant';
+import { withTenant, db, tid } from '@/lib/dal';
 import { z } from 'zod';
-import { prisma } from '@/lib/db';
 import { BookingStatus, PaymentPlan, CommsType } from '@prisma/client';
 import {
   achConfigured, encryptBankDetails, validRoutingNumber, validAccountNumber,
@@ -38,6 +39,7 @@ const Input = z.object({
 // alert the owner to originate the debit at the bank. NOTHING is charged here
 // and Square is never called — see lib/ach.ts.
 export async function POST(req: NextRequest, { params }: { params: { id: string } }) {
+  return withTenant(await resolveTenantId(req.headers.get('host')), async () => {
   if (!achConfigured()) return NextResponse.json({ error: 'ach_disabled', message: 'Direct bank payment isn’t available right now — choose another method.' }, { status: 503 });
 
   let body: unknown;
@@ -54,7 +56,7 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
   if (input.account !== input.accountConfirm)
     return NextResponse.json({ error: 'account_mismatch', message: 'The account numbers don’t match.' }, { status: 400 });
 
-  const booking = await prisma.booking.findUnique({ where: { id: params.id }, include: { client: true, property: true } });
+  const booking = await db().booking.findUnique({ where: { id: params.id }, include: { client: true, property: true } });
   if (!booking) return NextResponse.json({ error: 'not_found' }, { status: 404 });
   if (booking.status !== BookingStatus.APPROVED)
     return NextResponse.json({ error: 'not_finalizable', message: 'This booking isn’t awaiting payment.' }, { status: 409 });
@@ -84,9 +86,10 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
   const ipAddress = (req.headers.get('x-forwarded-for') || '').split(',')[0].trim() || 'unknown';
   const userAgent = (req.headers.get('user-agent') || 'unknown').slice(0, 400);
 
-  await prisma.$transaction(async (tx) => {
+  await db().$transaction(async (tx) => {
     await tx.achAuthorization.create({
       data: {
+        tenantId: tid(),
         bookingId: booking.id,
         nameOnAccount: input.nameOnAccount,
         bankName: input.bankName,
@@ -125,4 +128,5 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
   await logComms(booking.clientId, CommsType.BILL, `ACH authorization received (${input.bankName} ••••${input.account.slice(-4)}) — awaiting origination`);
 
   return NextResponse.json({ ok: true });
+});
 }

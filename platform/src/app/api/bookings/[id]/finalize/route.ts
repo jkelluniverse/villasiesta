@@ -1,4 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { resolveTenantId } from '@/lib/tenant';
+import { withTenant } from '@/lib/dal';
 import { z } from 'zod';
 import { finalizeBooking } from '@/lib/finalize';
 import { squareEnvironment, squareConfigured } from '@/lib/square';
@@ -13,6 +15,7 @@ const Input = z.object({
 });
 
 export async function POST(req: NextRequest, { params }: { params: { id: string } }) {
+  return withTenant(await resolveTenantId(req.headers.get('host')), async () => {
   let body: unknown;
   try { body = await req.json(); } catch { return NextResponse.json({ error: 'bad_json' }, { status: 400 }); }
   const parsed = Input.safeParse(body);
@@ -33,6 +36,7 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
     return NextResponse.json({ error: isKnown ? result.error : 'payment_failed', message: paymentMessage(result.error), detail }, { status: code });
   }
   return NextResponse.json({ ok: true, status: result.status, pendingAch: result.pendingAch, mock: result.mock });
+});
 }
 
 function paymentMessage(err?: string): string {

@@ -1,4 +1,4 @@
-import { prisma } from './db';
+import { db, tid } from './dal';
 import { BookingStatus, BlockSource, PaymentMethod, PaymentPlan } from '@prisma/client';
 import { loadPropertyPricing } from './pricing';
 import { assertRangeAvailable } from './availability';
@@ -33,7 +33,7 @@ export type FinalizeInput = {
 export type FinalizeResult = { ok: boolean; status?: BookingStatus; pendingAch?: boolean; mock?: boolean; error?: string };
 
 export async function finalizeBooking(input: FinalizeInput): Promise<FinalizeResult> {
-  const booking = await prisma.booking.findUnique({ where: { id: input.bookingId }, include: { client: true, property: true } });
+  const booking = await db().booking.findUnique({ where: { id: input.bookingId }, include: { client: true, property: true } });
   if (!booking) return { ok: false, error: 'not_found' };
   if (booking.status === BookingStatus.PAID || booking.status === BookingStatus.PARTIALLY_PAID)
     return { ok: true, status: booking.status };
@@ -105,7 +105,7 @@ export async function finalizeBooking(input: FinalizeInput): Promise<FinalizeRes
     : useSplit ? BookingStatus.PARTIALLY_PAID : BookingStatus.PAID;
 
   try {
-    await prisma.$transaction(async (tx) => {
+    await db().$transaction(async (tx) => {
       // Final double-booking guard at the moment of payment (self-excluded).
       await assertRangeAvailable(tx, booking.propertyId, ci, co, booking.id);
       await tx.booking.update({
@@ -132,7 +132,7 @@ export async function finalizeBooking(input: FinalizeInput): Promise<FinalizeRes
       const existing = await tx.calendarBlock.findUnique({ where: { bookingId: booking.id } });
       if (!existing) {
         await tx.calendarBlock.create({
-          data: { propertyId: booking.propertyId, startDate: parseKey(ci), endDate: parseKey(co), source: BlockSource.BOOKING, bookingId: booking.id, summary: 'Booked (direct)' },
+          data: { tenantId: tid(), propertyId: booking.propertyId, startDate: parseKey(ci), endDate: parseKey(co), source: BlockSource.BOOKING, bookingId: booking.id, summary: 'Booked (direct)' },
         });
       }
     });

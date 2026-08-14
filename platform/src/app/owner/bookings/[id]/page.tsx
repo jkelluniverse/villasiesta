@@ -1,4 +1,6 @@
 import { getServerSession } from 'next-auth';
+import { tenantIdFromHeaders } from '@/lib/tenant';
+import { withTenant } from '@/lib/dal';
 import { redirect, notFound } from 'next/navigation';
 import Link from 'next/link';
 import { authOptions } from '@/lib/auth';
@@ -18,6 +20,7 @@ const niceDay = (k: string) => { const [y, m, d] = k.split('-').map(Number); ret
 const niceDate = (iso: string) => new Date(iso).toLocaleDateString('en-US', { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' });
 
 export default async function BookingDetailPage({ params }: { params: { id: string } }) {
+  return withTenant(await tenantIdFromHeaders(), async () => {
   const session = await getServerSession(authOptions);
   if (!session?.user) redirect('/owner/login');
   const isOwner = session.user.role === 'OWNER';
@@ -149,6 +152,7 @@ export default async function BookingDetailPage({ params }: { params: { id: stri
       </div>
     </>
   );
+});
 }
 
 function PaymentBlock({ p, money }: { p: PaymentRecord; money: (n: number) => string }) {

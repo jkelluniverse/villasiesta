@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { runBalanceSweep, runArrivalSweep, runCalendarSweep } from '@/lib/sweeps';
+import { runBalanceSweepAllTenants, runArrivalSweepAllTenants, runCalendarSweepAllTenants } from '@/lib/sweeps';
 
 export const dynamic = 'force-dynamic';
 export const maxDuration = 300;   // sweeps send emails/charge cards — give them room
@@ -21,14 +21,14 @@ export async function GET(req: NextRequest, { params }: { params: { job: string 
   const job = params.job;
   const startedAt = new Date().toISOString();
   try {
-    if (job === 'balance') return NextResponse.json({ ok: true, job, startedAt, result: await runBalanceSweep() });
-    if (job === 'arrival') return NextResponse.json({ ok: true, job, startedAt, result: await runArrivalSweep() });
-    if (job === 'calendar') return NextResponse.json({ ok: true, job, startedAt, result: await runCalendarSweep() });
+    if (job === 'balance') return NextResponse.json({ ok: true, job, startedAt, result: await runBalanceSweepAllTenants() });
+    if (job === 'arrival') return NextResponse.json({ ok: true, job, startedAt, result: await runArrivalSweepAllTenants() });
+    if (job === 'calendar') return NextResponse.json({ ok: true, job, startedAt, result: await runCalendarSweepAllTenants() });
     if (job === 'all') {
       // Order matters: settle money first, then holds/sync, then arrival emails.
-      const balance = await runBalanceSweep();
-      const calendar = await runCalendarSweep();
-      const arrival = await runArrivalSweep();
+      const balance = await runBalanceSweepAllTenants();
+      const calendar = await runCalendarSweepAllTenants();
+      const arrival = await runArrivalSweepAllTenants();
       return NextResponse.json({ ok: true, job, startedAt, result: { balance, calendar, arrival } });
     }
     return NextResponse.json({ error: 'unknown_job', available: ['all', 'balance', 'arrival', 'calendar'] }, { status: 404 });

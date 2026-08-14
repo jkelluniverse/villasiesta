@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { resolveTenantId } from '@/lib/tenant';
+import { withTenant, db, tid } from '@/lib/dal';
 import { z } from 'zod';
-import { prisma } from '@/lib/db';
 import { computeQuote, loadPropertyPricing } from '@/lib/pricing';
 import { planCompStay } from '@/lib/stay-core';
 import { assertRangeAvailable, getBlockedRanges } from '@/lib/availability';
@@ -27,6 +28,7 @@ const BookingInput = z.object({
 });
 
 export async function POST(req: NextRequest) {
+  return withTenant(await resolveTenantId(req.headers.get('host')), async () => {
   let body: unknown;
   try { body = await req.json(); } catch { return NextResponse.json({ error: 'bad_json' }, { status: 400 }); }
 
@@ -36,7 +38,7 @@ export async function POST(req: NextRequest) {
 
   const loaded = await loadPropertyPricing(input.slug);
   if (!loaded) return NextResponse.json({ error: 'property_not_found' }, { status: 404 });
-  const propertyMeta = await prisma.property.findUnique({ where: { id: loaded.propertyId }, select: { commissionPercent: true } });
+  const propertyMeta = await db().property.findUnique({ where: { id: loaded.propertyId }, select: { commissionPercent: true } });
 
   // Plan the reservation: a 5–6 night selection books as a genuine full-week
   // reservation with the unused nights complimentary (server-authoritative).
@@ -58,18 +60,19 @@ export async function POST(req: NextRequest) {
   const commissionAmount = Math.round(commissionBase * commissionPercent) / 100;
 
   try {
-    const booking = await prisma.$transaction(async (tx) => {
+    const booking = await db().$transaction(async (tx) => {
       // Atomic double-booking guard over the FULL reservation span.
       await assertRangeAvailable(tx, loaded.propertyId, plan.checkIn, plan.checkOut);
 
       const client = await tx.client.upsert({
-        where: { email: input.email.toLowerCase() },
+        where: { tenantId_email: { tenantId: tid(), email: input.email.toLowerCase() } },
         update: { firstName: input.firstName, lastName: input.lastName, phone: input.phone || undefined },
-        create: { email: input.email.toLowerCase(), firstName: input.firstName, lastName: input.lastName, phone: input.phone || null },
+        create: { tenantId: tid(), email: input.email.toLowerCase(), firstName: input.firstName, lastName: input.lastName, phone: input.phone || null },
       });
 
       return tx.booking.create({
         data: {
+          tenantId: tid(),
           reference: await newUniqueReference(tx),
           propertyId: loaded.propertyId,
           clientId: client.id,
@@ -108,6 +111,7 @@ export async function POST(req: NextRequest) {
     console.error('[bookings] create failed', e);
     return NextResponse.json({ error: 'server_error' }, { status: 500 });
   }
+});
 }
 
 async function sendBookingEmails(

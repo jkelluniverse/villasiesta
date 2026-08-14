@@ -1,5 +1,5 @@
-import { prisma } from './db';
 import { BookingStatus } from '@prisma/client';
+import { db, tid } from './dal';
 import { toKey } from './dates';
 
 // The money view. Revenue rows are stays with money actually in motion —
@@ -69,10 +69,10 @@ function add(t: LedgerTotals, r: LedgerRow): void {
 }
 
 export async function getLedger(slug: string, year?: number): Promise<Ledger | null> {
-  const property = await prisma.property.findUnique({ where: { slug }, select: { id: true, currency: true } });
+  const property = await db().property.findFirst({ where: { slug }, select: { id: true, currency: true } });
   if (!property) return null;
 
-  const bookings = await prisma.booking.findMany({
+  const bookings = await db().booking.findMany({
     where: { propertyId: property.id, status: { in: [BookingStatus.PAID, BookingStatus.PARTIALLY_PAID] } },
     include: { client: true },
     orderBy: { checkIn: 'desc' },
