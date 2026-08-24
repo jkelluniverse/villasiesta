@@ -15,6 +15,23 @@ export function squareEnvironment(): 'sandbox' | 'production' {
   return process.env.SQUARE_ENVIRONMENT === 'production' ? 'production' : 'sandbox';
 }
 
+/**
+ * Catch the classic misconfiguration that breaks the card form with confusing
+ * "not valid" errors: a sandbox application id (sandbox-sq0idb-…) served with
+ * the production SDK, or a production id (sq0idp-…) with the sandbox SDK.
+ * Returns a human-readable problem, or null when consistent.
+ */
+export function squareConfigProblem(): string | null {
+  if (!squareConfigured()) return null;   // mock mode — nothing to mismatch
+  const appId = process.env.NEXT_PUBLIC_SQUARE_APPLICATION_ID || '';
+  const env = squareEnvironment();
+  if (!appId) return 'NEXT_PUBLIC_SQUARE_APPLICATION_ID is missing (NEXT_PUBLIC_* vars bake in at BUILD time — set it and redeploy).';
+  const looksSandbox = appId.startsWith('sandbox-');
+  if (env === 'production' && looksSandbox) return 'SQUARE_ENVIRONMENT=production but the application id is a sandbox id (sandbox-…) — the card form will reject everything.';
+  if (env === 'sandbox' && !looksSandbox) return 'SQUARE_ENVIRONMENT=sandbox but the application id is a production id — the card form will reject everything.';
+  return null;
+}
+
 let _client: SquareClient | null = null;
 export function square(): SquareClient {
   if (!_client) {

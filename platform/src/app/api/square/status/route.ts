@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server';
-import { squareConfigured, squareEnvironment } from '@/lib/square';
+import { squareConfigured, squareEnvironment, squareConfigProblem } from '@/lib/square';
 
 export const dynamic = 'force-dynamic';
 
@@ -8,6 +8,7 @@ export async function GET() {
   return NextResponse.json({
     configured: squareConfigured(),
     mode: squareConfigured() ? `LIVE (${squareEnvironment()} Square charges)` : 'MOCK (simulated charges)',
+    configProblem: squareConfigProblem(),   // null = consistent; else the card form is broken and this says why
     present: {
       SQUARE_ACCESS_TOKEN: !!process.env.SQUARE_ACCESS_TOKEN,
       SQUARE_ENVIRONMENT: process.env.SQUARE_ENVIRONMENT || '(unset → sandbox)',

@@ -3,7 +3,7 @@ import { withTenant, db } from '@/lib/dal';
 import { loadPropertyPricing, computeQuote } from '@/lib/pricing';
 import { splitEligible } from '@/lib/finalize';
 import { addDays, toKey, todayKey } from '@/lib/dates';
-import { squareConfigured, squareEnvironment } from '@/lib/square';
+import { squareConfigured, squareEnvironment, squareConfigProblem } from '@/lib/square';
 import { chargeForBooking } from '@/lib/booking-pricing';
 import { achConfigured } from '@/lib/ach';
 import { TRANSFER_APPS, HOST_NAME, HOST_PHONE } from '@/lib/manual';
@@ -95,6 +95,7 @@ export default async function FinalizePage({ params }: { params: { id: string } 
             splitEligible={splitEligible(ci)}
             guestName={`${booking.client.firstName} ${booking.client.lastName}`.trim()}
             squareConfigured={squareConfigured()}
+            squareBroken={!!squareConfigProblem()}
             squareEnv={squareEnvironment()}
             appId={process.env.NEXT_PUBLIC_SQUARE_APPLICATION_ID || ''}
             locationId={process.env.NEXT_PUBLIC_SQUARE_LOCATION_ID || ''}

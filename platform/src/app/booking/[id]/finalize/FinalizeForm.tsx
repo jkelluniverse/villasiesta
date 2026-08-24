@@ -25,13 +25,15 @@ declare global { interface Window { Square?: { payments: (appId: string, locatio
 export default function FinalizeForm(props: {
   bookingId: string; reference: string; lastName: string;
   currency: string; baseTotal: number; cardTotal: number; achTotal: number; cardPct: number; achPct: number;
-  splitEligible: boolean; guestName: string; squareConfigured: boolean; squareEnv: string;
+  splitEligible: boolean; guestName: string; squareConfigured: boolean; squareBroken?: boolean; squareEnv: string;
   appId: string; locationId: string;
   transferApps: TransferApp[]; hostName: string; hostPhone: string;
   todayKey: string; balanceDueKey: string; nsfFee: number; instantAchEnabled: boolean;
 }) {
   const { currency: cur } = props;
-  const [method, setMethod] = useState<Method>(props.instantAchEnabled ? 'instant' : 'ach');
+  const [method, setMethod] = useState<Method>(
+    props.squareBroken ? (props.instantAchEnabled ? 'instant' : 'zelle') : props.instantAchEnabled ? 'instant' : 'ach',
+  );
   const [plan, setPlan] = useState<'full' | 'split'>('full');
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState('');
@@ -143,8 +145,12 @@ export default function FinalizeForm(props: {
         setNotice('');
       }
       if (tokenRes.status !== 'OK' || !tokenRes.token) {
-        const detail = tokenRes.errors?.map((x) => x.message).filter(Boolean).join('; ');
-        setErr(detail ? `Payment details could not be verified: ${detail}` : 'Payment was cancelled or could not be verified.');
+        const msgs = (tokenRes.errors ?? []).map((x) => x.message).filter(Boolean) as string[];
+        const invalidCount = msgs.filter((m) => /not valid/i.test(m)).length;
+        // Every field "not valid" at once = the secure card box was left empty.
+        setErr(invalidCount >= 2
+          ? 'Please fill in the card number, expiration date, and CVV in the secure card box above, then press Pay again. (Nothing has been charged.)'
+          : msgs.length ? `Please check your card details: ${msgs.join('; ')}` : 'Payment was cancelled or could not be verified — nothing has been charged.');
         setBusy(false); return;
       }
 
@@ -190,7 +196,9 @@ export default function FinalizeForm(props: {
     );
   }
 
-  const pickable: Method[] = [...(props.instantAchEnabled ? (['instant'] as Method[]) : []), 'ach', 'card', ...MANUAL];
+  const pickable: Method[] = props.squareBroken
+    ? [...(props.instantAchEnabled ? (['instant'] as Method[]) : []), ...MANUAL]
+    : [...(props.instantAchEnabled ? (['instant'] as Method[]) : []), 'ach', 'card', ...MANUAL];
 
   return (
     <div>
@@ -205,6 +213,12 @@ export default function FinalizeForm(props: {
           </label>
         ))}
       </div>
+
+      {props.squareBroken ? (
+        <div className="pay-note" style={{ textAlign: 'left', marginBottom: 12 }}>
+          Card and bank-login payments are temporarily unavailable — the options below work normally, or try again in a little while.
+        </div>
+      ) : null}
 
       {showSplit ? (
         <div className="pay-plan">
